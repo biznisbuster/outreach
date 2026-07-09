@@ -38,11 +38,11 @@ const { campaigns, class: cls = "" } = Astro.props;
 
 <dialog
   id="import-dialog"
-  class={`modal-dialog overflow-visible border-0 bg-transparent p-0 backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}
+  class={`modal-dialog modal-fullscreen-md overflow-visible border-0 bg-transparent p-0 backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}
   style="--modal-max-w: 720px"
 >
-  <div class="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-    <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+  <div class="flex h-full max-h-[100dvh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl md:max-h-[85vh]">
+    <header class="flex items-start justify-between gap-4 border-b border-border px-4 py-3 md:px-5 md:py-4">
       <div>
         <h2 class="text-lg font-bold tracking-tight">Import leadova</h2>
         <p class="mt-0.5 text-sm text-muted-foreground">CSV ili JSON — pregled pre ubacivanja</p>
@@ -57,7 +57,7 @@ const { campaigns, class: cls = "" } = Astro.props;
       </button>
     </header>
 
-    <div class="flex-1 overflow-y-auto px-5 py-4">
+    <div class="flex-1 overflow-y-auto px-4 py-4 md:px-5">
       <!-- error banner -->
       <div
         id="import-error"
@@ -112,7 +112,7 @@ const { campaigns, class: cls = "" } = Astro.props;
           Pregled (<span id="import-total">0</span> redova)
         </div>
 
-        <div class="mb-3 grid grid-cols-4 gap-2 text-center text-sm">
+        <div class="mb-3 grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-4">
           <div class="rounded-md border border-success/30 bg-success-soft px-3 py-2">
             <div class="text-xs font-medium text-success">Novih</div>
             <div class="text-lg font-bold text-success tabular-nums" id="import-new-count">0</div>

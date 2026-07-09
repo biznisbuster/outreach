@@ -38,8 +38,8 @@ const { campaigns, autoOpen = false, class: cls = "" } = Astro.props;
   </Button>
 )}
 
-<dialog id="add-lead-dialog" class={`modal-dialog rounded-xl border border-border bg-card p-0 shadow-2xl backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}>
-  <div class="flex max-h-[85vh] w-[min(720px,calc(100vw-2rem))] flex-col">
+<dialog id="add-lead-dialog" class={`modal-dialog modal-fullscreen-md rounded-xl border border-border bg-card p-0 shadow-2xl backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}>
+  <div class="flex h-full max-h-[100dvh] w-full flex-col md:max-h-[85vh] md:w-[min(720px,calc(100vw-2rem))]">
     <!-- Header -->
     <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
       <div>
@@ -63,9 +63,9 @@ const { campaigns, autoOpen = false, class: cls = "" } = Astro.props;
       id="add-lead-form"
       method="POST"
       action="/api/leads/create"
-      class="flex-1 overflow-y-auto px-5 py-4"
+      class="flex-1 overflow-y-auto px-4 py-4 md:px-5"
     >
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <!-- Naziv — full width -->
         <div class="col-span-2 space-y-1.5">
           <label for="add-lead-name" class="block text-sm font-medium">
@@ -124,7 +124,7 @@ const { campaigns, autoOpen = false, class: cls = "" } = Astro.props;
           <input id="add-lead-postal" name="postalCode" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div class="space-y-1.5">
             <label for="add-lead-rating" class="block text-sm font-medium">Google ocena</label>
             <input id="add-lead-rating" name="googleRating" type="number" step="0.1" min="1" max="5" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />

@@ -71,7 +71,7 @@ function ratingHint(rating: number | null) {
 ---
 <AppLayout title={`${campaign.name} — Kampanje`}>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
       <div>
         <a href="/campaigns" class="text-xs text-muted-foreground hover:underline">← Kampanje</a>
         <h1 class="text-xl font-bold tracking-tight text-slate-900">{campaign.name}</h1>
@@ -97,7 +97,7 @@ function ratingHint(rating: number | null) {
       </div>
     </div>
 
-    <div class="space-y-6 p-6">
+    <div class="space-y-6 p-4 md:p-6">
       <!-- 1) SCRAPE — primarno -->
       <Card>
         <CardHeader>

@@ -67,7 +67,7 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
 <AppLayout title={`${lead.name} — Outreach`}>
   <div>
     <!-- Header -->
-    <div class="border-b border-slate-200 bg-white px-6 py-4">
+    <div class="border-b border-slate-200 bg-white px-4 py-3 md:px-6 md:py-4">
       <div class="flex items-center justify-between gap-3">
         <a href="/leads" class="text-xs text-muted-foreground hover:underline">← Leadovi</a>
         <div class="flex items-center gap-2">
@@ -159,9 +159,9 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
       </div>
     </div>
 
-    {/* TAB nav + action buttons row — sticky under header */}
-    <div class="sticky top-0 z-30 -mt-px border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-      <div class="flex h-11 items-center gap-1 px-6">
+    {/* TAB nav + action buttons row — sticky under header (samo ≥md, na mobilnom jede prostor) */}
+    <div class="md-sticky-only md:sticky md:top-0 z-30 -mt-px border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+      <div class="flex h-11 items-center gap-1 overflow-x-auto px-4 md:px-6">
         {/* Tabs (left) */}
         <nav class="flex items-center gap-1" role="tablist" aria-label="Lead tabs">
           <button
@@ -311,7 +311,7 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
 
     {/* TAB: Overview (existing content) */}
     <div data-tab-panel="overview" hidden={activeTab !== "overview"}>
-    <div class="space-y-6 p-6">
+    <div class="space-y-6 p-4 md:p-6">
       {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
       {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
@@ -496,7 +496,7 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
 
     {/* TAB: Audit */}
     <div data-tab-panel="audit" hidden={activeTab !== "audit"}>
-      <div class="space-y-6 p-6">
+      <div class="space-y-6 p-4 md:p-6">
         <AuditPanel
           lead={{
             id: lead.id,

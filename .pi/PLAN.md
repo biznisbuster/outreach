@@ -1,7 +1,7 @@
 # redesign whole ui/ux not changing functionaility astro-gui
 
 _Generated: 2026-07-08T22:01:08.429Z_
-_Last updated: 2026-07-09T13:59:19.352Z_
+_Last updated: 2026-07-09T22:33:04.495Z_
 
 ## Context
 
@@ -144,24 +144,55 @@ Scoring is pure Python — no LLM in the loop. Existing site_analysis (AI 1-10 f
 
 
 
-# Leads refaktor — napredan filter, sort, fiksna visina
+# Mobile responsive za `gui-astro/` — bez diranja desktop-a
 
-## Odlike (potvrđene)
+_Generated: 2026-07-10_
+_Last updated: 2026-07-10_
 
-- **Nove kolone:** Reviews, Google Rating, M3 Overall, M3 SEO, Last Email (status/datum)
-- **Sort:** Shift+click = multi-column sa prioritetom (1/2/3)
-- **Filteri:** Osnovni inline + collapsible "Više filtera" panel
+## Cilj
+
+Aplikacija mora da radi udobno na telefonu (~360-414px širine), **bez ikakve promene** desktop izgleda (≥768px) i funkcionalnosti (URL parami, form akcije, inline JS, API rutе).
+
+## Odluke (zaključane)
+
+| Stvar | Odluka |
+|---|---|
+| Sidebar na mobilnom | **Hamburger + off-canvas drawer** sa overlay-om (iste linkove) |
+| Tabele | **Hibrid**: postojeći horizontal-scroll na tableti/desktopu, **card stack** na telefonu (<640px) |
+| Breakpoint sistem | Tailwind v4 default: `sm: 640px`, `md: 768px`, `lg: 1024px`. **Mobile-first**: default = mobilni, `md:` = tablet/desktop. |
+| Scope (1. prolaz) | Kritične: `/leads`, `/leads/[id]`, `/` (dashboard) |
+| Scope (2. prolaz) | `/queue`, `/campaigns`, `/campaigns/[id]`, `/inbox`, `/senders`, `/settings`, `/statuses`, `/templates`, `/audit`, `/attachments` |
 
 ## Arhitektura
 
+### Tokovi na mobilnom
+
 ```
-Browser                           Server
-────────                          ──────
-GET /leads?sort=name:asc,...     →  parseSort(sort)
-                                  →  buildWhere(filters)   (Drizzle WHERE)
-                                  →  buildOrderBy(sorts)   (Drizzle ORDER BY)
-                                  →  LEFT JOIN subqueries za M3 + last email
-                                  →  render tabela
+┌──────────────────────────────────────┐
+│ [☰]  Outreach          [🔍] [theme] │  ← MobileTopBar (samo < md)
+├──────────────────────────────────────┤
+│                                       │
+│   <Page slot>                         │  ← AppLayout main
+│                                       │
+│                                       │
+├──────────────────────────────────────┤
+│   (Tab-bar? NE — ima 14 strana)      │
+└──────────────────────────────────────┘
+
+Drawer (overlay, slide-in s leva):
+┌─────────────────────┐
+│ Outreach        [✕]  │
+│ ─────────────────── │
+│ Sad                 │
+│  📊 Dashboard       │
+│ Outreach            │
+│  👥 Kampanje        │
+│  📋 Leadovi         │
+│  ...                │
+│ ─────────────────── │
+│ [🌗 Tema]           │
+│ [Odjavi se]         │
+└─────────────────────┘
 ```
 
 ## Fajlovi
@@ -170,172 +201,161 @@ GET /leads?sort=name:asc,...     →  parseSort(sort)
 
 | Putanja | Svrha |
 |---|---|
-| `src/lib/leads-query.ts` | Centralna logika: `COLUMNS`, `parseSort()`, `encodeSort()`, `buildWhere()`, `buildOrderBy()`. Koristi ga i API i UI. |
-| `src/components/SortHeader.astro` | `<th>` komponenta: klik = sort, Shift+Klik = multi-sort. Prikazuje ▲▼ + broj prioriteta. |
-| `src/components/FilterPanel.astro` | Collapsible panel sa naprednim filterima (score range, reviews range, rating range, source, import datum, last email status). |
+| `src/components/MobileTopBar.astro` | Fix header (h-14) sa hamburger-om (levo), brend imenom (centar), search/theme (desno). Vidljiv samo `<md`. |
+| `src/components/MobileSidebar.astro` | Off-canvas drawer verzija Sidebar-a (render-uje isti `sections` array). Isti linkovi, ista logika aktivnog linka. |
+| `src/lib/breakpoint.ts` | Pomoćne JS funkcije: `isMobile()`, `useBreakpoint()` — koriste `matchMedia` sa passive listenerom. |
+| `src/styles/mobile.css` | Mobile-specifične CSS varijable, touch target minimumi, safe area insets, hover-disable na touch. |
 
-### Izmene
+### Izmenjeni
 
 | Putanja | Izmena |
 |---|---|
-| `src/pages/leads/index.astro` | Potpuni refaktor: novi FilterBar + collapsible panel + nova tabela sa fiksnom visinom + sticky header + multi-sort handler |
-| `src/pages/api/leads.ts` | Koristi `buildWhere` + `buildOrderBy` iz lib-a, dodaje subquery za M3 + last email |
+| `src/layouts/AppLayout.astro` | Dodaje `<MobileTopBar />`, drawer state (`<MobileSidebar />`), body scroll lock kad je drawer otvoren. Viewport meta proširen sa `viewport-fit=cover` za notched telefone. |
+| `src/components/Sidebar.astro` | Dodaje `hidden md:flex` da se sakrije na mobilnom. Logika i dalje radi; MobileSidebar importuje isti `sections`. |
+| `src/components/Table.astro` | Novi prop `responsive` (default `true`). Kada `true`: outer wrapper ima `md:overflow-x-auto`, ali je mobile verzija sakrivena. **Ili**: dva slota — `default` (tabela) i `cards` (card stack), prikaz po breakpointu. |
+| `src/components/AddLeadDialog.astro` | `md:max-w-lg md:rounded-lg md:m-auto` + `md:mt-16` — na mobilnom postaje full-screen (modal postaje fixed inset-0). |
+| `src/components/ImportDialog.astro` | Isto kao AddLeadDialog. |
+| `src/components/CommandPalette.astro` | Već je overlay modal — dodaje samo `inset-0 md:inset-x-0 md:top-20 md:max-w-2xl md:mx-auto`. |
+| `src/components/PageHeader.astro` | (1) Title `text-xl` → `text-lg md:text-xl` (default size). (2) `flex-wrap` već ima — dodaje `w-full md:w-auto` na actions slot kontejner da se dugmad slome na svoj red. (3) Padding `px-6 py-4` → `px-4 py-3 md:px-6 md:py-4`. |
+| `src/components/KpiCard.astro` | Nema promena (koristi se u gridu; grid se menja u stranicama). |
+| `src/components/FilterBar.astro` | Container `flex-wrap gap-2` — već radi za mobilni, ali treba dodati `flex-col sm:flex-row` da na telefonu inputi idu vertikalno. |
+| `src/components/FilterPanel.astro` | Grid `grid-cols-2 md:grid-cols-3 lg:grid-cols-4` za field grupe. Na telefonu 1 kolona. |
+| `src/components/Avatar.astro` | Veličina: fiksna → `h-9 w-9 md:h-10 md:w-10` za touch-friendly. |
+| `src/components/Button.astro` | Touch target: dodaje `min-h-[44px] sm:min-h-0` za primarne akcije u PageHeader (iako već ima `h-9`, na mobilnom treba biti barem 44px). |
+| `src/pages/index.astro` | KPI grid: `grid-cols-2 md:grid-cols-4` (umesto `grid-cols-4`). "Za zvanje danas" i ostali blokovi: `p-4 md:p-6`. |
+| `src/pages/leads/index.astro` | (1) FilterBar/FilterPanel: `flex-col sm:flex-row` za search row. (2) Tabela: dodaje `cards` slot sa mobile card renderom (videti ispod). (3) Pagination: brojevi stranica skraćeni na mobilnom. |
+| `src/pages/leads/[id].astro` | (1) Outer grid: `grid-cols-1 lg:grid-cols-3` (umesto `lg:grid-cols-3` ako već postoji). (2) Srednja kolona ide ispod na mobilnom. (3) AuditPanel (tab): collapse u accordion na mobilnom. (4) Comments/contact grid: `grid-cols-1 md:grid-cols-2`. |
+| `src/pages/leads/new.astro` | Form grid: `grid-cols-1 md:grid-cols-2` (umesto `md:grid-cols-2` ako već ima). |
 
-## URL parametri
-
-### Filter (svi postoje + novi)
-
-| Parametar | Tip | Primer |
-|---|---|---|
-| `search` | string | `?search=zubar` |
-| `statusId` | id / "null" | `?statusId=3` |
-| `campaignId` | id | `?campaignId=5` |
-| `city` | string | `?city=Niš` |
-| `hasEmail` | 0/1 | `?hasEmail=1` |
-| `noWebsite` | 0/1 | `?noWebsite=1` |
-| `hasPhone` | 0/1 | `?hasPhone=1` |
-| `hasScreenshot` | 0/1 | `?hasScreenshot=1` |
-| `dnc` | 0/1 | `?dnc=0` |
-| **`hasAnalysis`** | 0/1 | `?hasAnalysis=1` (ima M3 ocenu) |
-| **`minScore`, `maxScore`** | number | `?minScore=7&maxScore=10` (M3 overall) |
-| **`minReviews`, `maxReviews`** | number | `?minReviews=10&maxReviews=100` |
-| **`minRating`, `maxRating`** | number | `?minRating=4&maxRating=5` |
-| **`source`** | string | `?source=google_maps` |
-| **`importedFrom`, `importedTo`** | ISO date | `?importedFrom=2026-01-01` |
-| **`lastEmailStatus`** | enum | `?lastEmailStatus=sent` (draft/queued/sent/failed/bounced/none) |
-
-### Sort
-
-`?sort=col1:dir1,col2:dir2,col3:dir3`
-
-- `col` = key iz `COLUMNS` definicije
-- `dir` = `asc` ili `desc`
-- Više kolona = multi-sort sa prioritetom (redosled u URL-u)
-
-Primeri:
-- `?sort=name:asc`
-- `?sort=createdAt:desc,name:asc` (primarni: noviji prvo, sekundarni: ime A-Z)
-
-## Kolone
-
-Definisane u `COLUMNS` nizu (lib/leads-query.ts). Svaka ima:
-- `key` — URL/DB identifikator
-- `label` — header text
-- `sortable` — boolean
-- `align` — left/center/right
-- `class` — tailwind klase za ćeliju
-- `render` — (row) => HTML (za custom badge-ove, linkove itd.)
-
-```ts
-type Col = {
-  key: string;
-  label: string;
-  sortable: boolean;
-  align?: "left" | "center" | "right";
-  width?: string;          // "w-32", "min-w-[100px]"
-  defaultSortDir?: "asc" | "desc";
-  render: (row: LeadRow) => string;  // sigurno-escaped HTML
-  raw?: (row: LeadRow) => unknown;    // za sortiranje ako je render drugačiji
-};
-
-const COLUMNS: Col[] = [
-  { key: "name", label: "Naziv", sortable: true, ... },
-  { key: "status", label: "Status", sortable: true, render: (r) => statusBadge(r.statusName, r.statusColor) },
-  { key: "campaign", label: "Kampanja", sortable: true, render: (r) => r.campaignName ?? "—" },
-  { key: "city", label: "Grad", sortable: true, ... },
-  { key: "email", label: "Email", sortable: true, ... },
-  { key: "phone", label: "Telefon", sortable: true, ... },
-  { key: "website", label: "Web", sortable: true, ... },
-  // NOVE:
-  { key: "googleRating", label: "Rating", sortable: true, align: "center", render: (r) => r.googleRating ? `${r.googleRating}/5` : "—" },
-  { key: "reviewsCount", label: "Recenzije", sortable: true, align: "right", render: (r) => r.reviewsCount ?? "—" },
-  { key: "m3Overall", label: "M3", sortable: true, align: "center", render: (r) => m3Badge(r.m3Overall) },
-  { key: "m3Seo", label: "SEO", sortable: true, align: "center", render: (r) => scoreBadge(r.m3Seo) },
-  { key: "lastEmail", label: "Posl. email", sortable: true, render: (r) => lastEmailCell(r.lastEmailStatus, r.lastEmailSentAt) },
-  { key: "screenshot", label: "📷", sortable: false, align: "center", ... },
-];
-```
-
-## Sort UX
-
-- Klik na `<th>`: ako je već jedini primarni → toggle dir; inače postavi kao jedini primarni (asc).
-- Shift+Klik: dodaj u multi-sort (ako već postoji → toggle dir, ako je poslednji sa toggle na "asc" → ukloni).
-- Indikatori:
-  - `▲` za asc, `▼` za desc, prazno za nesortiranu
-  - Broj prioriteta (1, 2, 3) za multi-sort
-- Primer: `Name ▼1  City ▲2  Rating  (prazno)`
-
-## Filter panel UX
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ [search...] [Status v] [Kampanja v] [Grad v] [Filtriraj] [Reset]   │
-│                                                       [Više filtera v]│  ← toggle
-└────────────────────────────────────────────────────────────────────┘
-   Kada otvoreno:
-┌────────────────────────────────────────────────────────────────────┐
-│ M3 ocena: [min] — [max]     Recenzije: [min] — [max]               │
-│ Google: [min] — [max]       Izvor: [v]                             │
-│ Import: [od] [do]           Poslednji email: [v]                   │
-│ [x] Ima screenshot  [x] Ima M3 ocenu  [x] U DNC                   │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-State drži u URL parametrima. Submit dugme refrešuje sa svim parametrima.
-
-## Fiksna visina tabele
+## Ključni CSS (mobile.css)
 
 ```css
-.leads-table-wrapper {
-  max-height: calc(100vh - 380px);  /* fallback: 70vh na manjim ekranima */
-  overflow-y: auto;
-  overflow-x: auto;
+/* Touch-friendly tap targets */
+@media (pointer: coarse) {
+  button, a[role="button"], [role="button"], input[type="submit"] {
+    min-height: 44px;
+  }
 }
-.leads-table-wrapper thead th {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: hsl(var(--card));  /* da ne prosijava */
+
+/* Disable hover na touch (čuva :hover state čistim) */
+@media (hover: none) {
+  *:hover { background-color: inherit !important; }
+  /* Specifični hover efekti se primenjuju samo (hover: hover) */
+}
+
+/* Safe area (notched phones) */
+.safe-top    { padding-top:    env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-x      { padding-left:   env(safe-area-inset-left);
+               padding-right:  env(safe-area-inset-right); }
+
+/* Card view <sm */
+.card-view   { display: block; }
+.md\:table-view { display: none; }
+@media (min-width: 640px) {
+  .card-view   { display: none; }
+  .md\:table-view { display: block; }
 }
 ```
 
-Sticky header zadržava vidljivost kolona dok korisnik skroluje vertikalno.
+## Hibridna tabela — `Table.astro` (novi API)
 
-## M3 + last email subqueries
+```astro
+<Table responsive>
+  <table class="hidden sm:table w-full text-sm">
+    <thead>...</thead>
+    <tbody>...</tbody>
+  </table>
 
-Dodati u SELECT:
-
-```sql
-(SELECT overall_score FROM site_analysis 
- WHERE lead_id = leads.id ORDER BY analyzed_at DESC LIMIT 1) AS m3_overall,
-
-(SELECT seo_score FROM site_analysis 
- WHERE lead_id = leads.id ORDER BY analyzed_at DESC LIMIT 1) AS m3_seo,
-
-(SELECT status FROM email_sends 
- WHERE lead_id = leads.id ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1) AS last_email_status,
-
-(SELECT COALESCE(sent_at, queued_at, created_at) FROM email_sends 
- WHERE lead_id = leads.id ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1) AS last_email_at
+  <!-- Mobile card view: isti rows, drugačiji layout -->
+  <div class="sm:hidden space-y-2">
+    {rows.map(row => (
+      <a href={...} class="block rounded-lg border border-border bg-card p-3">
+        <div class="font-medium">{row.name}</div>
+        <div class="text-xs text-muted-foreground">{row.city} · {row.email}</div>
+        <div class="mt-2 flex gap-2">...</div>
+      </a>
+    ))}
+  </div>
+</Table>
 ```
 
-Postojeći CASE za `has_screenshot` se zamenjuje LEFT JOIN sa `screenshots` + DISTINCT ili ostaje kao EXISTS subquery (radi OK).
+Wrapper detektuje `responsive` flag i primenjuje `p-0 sm:p-0` (bez border na mobilnom jer card view ima svoj border).
+
+## Mobile drawer state (AppLayout)
+
+```astro
+<!-- U <body> -->
+<MobileTopBar />
+<div class="flex h-screen overflow-hidden">
+  <Sidebar class="hidden md:flex" />     <!-- Desktop sidebar, sakriven <md -->
+  <Sidebar
+    variant="drawer"
+    id="mobile-sidebar-drawer"
+    class="md:hidden fixed inset-y-0 left-0 z-50 -translate-x-full transition-transform"
+    data-drawer-state="closed"
+  />
+  <main class="flex-1 overflow-y-auto md:overflow-y-auto">
+    <slot />
+  </main>
+</div>
+
+<!-- Backdrop -->
+<div id="mobile-sidebar-backdrop"
+     class="md:hidden fixed inset-0 z-40 bg-black/50 opacity-0 pointer-events-none transition-opacity"
+     data-backdrop-state="closed"></div>
+
+<script is:inline>
+  // Toggle logika
+  function openDrawer() {
+    document.getElementById('mobile-sidebar-drawer').dataset.drawerState = 'open';
+    document.getElementById('mobile-sidebar-drawer').classList.remove('-translate-x-full');
+    document.getElementById('mobile-sidebar-backdrop').dataset.backdropState = 'open';
+    document.getElementById('mobile-sidebar-backdrop').classList.remove('opacity-0', 'pointer-events-none');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeDrawer() {
+    document.getElementById('mobile-sidebar-drawer').dataset.drawerState = 'closed';
+    document.getElementById('mobile-sidebar-drawer').classList.add('-translate-x-full');
+    document.getElementById('mobile-sidebar-backdrop').dataset.backdropState = 'closed';
+    document.getElementById('mobile-sidebar-backdrop').classList.add('opacity-0', 'pointer-events-none');
+    document.body.style.overflow = '';
+  }
+  // Hamburger toggle, backdrop click, ESC, route change
+</script>
+```
+
+## Touch-friendly akcije u PageHeader
+
+Akcije u headeru (npr. `[+ Dodaj]`, `[Sačuvaj]`) treba da budu lako tapljive:
+- Default button size je `h-9` (36px) — ispod Apple guideline (44px).
+- Rešenje: novi `Button` size `mobile-touch` koji je `h-11 sm:h-9` (44px na mobilnom, 36px na desktopu).
+- Alternativno: PageHeader wrap dugmad u `min-h-[44px] sm:min-h-0` kontejner.
 
 ## Verifikacija
 
-- typecheck (`npm run typecheck`)
-- build (`npm run build`)
-- Ručno: otvoriti `/leads` u browser-u, testirati:
-  - Svaki filter radi samostalno
-  - Kombinacija filtera radi
-  - Sort klik + shift+click
-  - Multi-sort URL se čuva
-  - Tabela ima sticky header i fiksnu visinu
-  - Tabela skroluje unutar sebe, ne ceo page
+1. **Build**: `cd gui-astro && npm run build` — bez grešaka
+2. **Typecheck**: `npm run typecheck`
+3. **Manualno** (Chrome DevTools responsive mode):
+   - **iPhone SE (375×667)**: Dashboard, Leads lista, Lead detail — sve čitljivo, nema horizontalnog overflow-a sem unutar tabela gde je to namerno
+   - **iPad (768×1024)**: Videti kao desktop, sidebar vidljiv, nema drawer
+   - **1280px**: Identičan postojećem izgledu (regression check)
+4. **Touch test**: Otvoriti stvarni mobilni uređaj, testirati tap targets, drawer gesture, dropdown menije
 
-## Nije u scope-u
+## Van scope-a (za kasnije)
 
-- Inline editovanje (klik na ćeliju → input) — zaseban feature
-- Export filterovanih rezultata (CSV) — već postoji bulk, može se dograditi
-- Saved views / bookmark filter kombinacija
-- Bulk akcije u novoj tabeli (već rade preko bulk endpointa)
+- **PWA / offline mode** — zasebna priča, manifest + service worker
+- **Bottom navigation** — odbačeno kao primarno rešenje; može kasnije ako treba
+- **Gesture-based drawer** (swipe to open/close) — koristimo dugme za sada, swipe je nice-to-have
+- **Print styles** — već ne postoje, dodati ako treba
+- **Landscape orientation lock** za telefone — ne radimo
+
+## Rizici / edge cases
+
+1. **Tables with 10+ columns** (audit, leads) — card view mora da ima smislen "preview" subset polja, ne sve. Odlučiti per-page koji podaci su ključni.
+2. **Modali sa dugim formama** — fullscreen modal na mobilnom = korisnik mora da skroluje formu BEZ da vidi backdrop. Dodati sticky header/footer u modal sa "Otkaži" / "Sačuvaj" dugmadima.
+3. **Filteri sa puno inputa** — na mobilnom, default stanje je sve vidljivo (bez "Više filtera" collapsible) jer je prostor ionako ograničen. Ili: collapse u accordion.
+4. **Leads detail screenshot lightbox** — inline JS koristi `document.body.style.overflow = 'hidden'` — u kombinaciji sa drawer lock-om može biti sukob. Koristiti klasu `body.no-scroll` umesto inline style.
+5. **Sticky elements** (table header, page header sticky) — na mobilnom, sticky page header može da pojede previše prostora. Držati `sticky` samo na desktopu (`sticky md:sticky`).
+6. **iOS Safari address bar** — `h-screen` ne radi pouzdano; koristiti `h-[100dvh]` za `MobileTopBar` i drawer.
+7. **Hover state na touch** — videti `mobile.css` rešenje.

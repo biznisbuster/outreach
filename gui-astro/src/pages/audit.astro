@@ -8,12 +8,12 @@ const items = listAudit({ limit: 200 });
 ---
 <AppLayout title="Audit — Outreach">
   <div>
-    <div class="border-b px-6 py-4">
+    <div class="border-b px-4 py-3 md:px-6 md:py-4">
       <h1 class="text-xl font-bold tracking-tight">Audit log</h1>
       <p class="text-sm text-muted-foreground">{items.length} poslednjih događaja</p>
     </div>
 
-    <div class="p-6">
+    <div class="p-4 md:p-6">
       <Card>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">

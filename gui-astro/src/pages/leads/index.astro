@@ -144,6 +144,58 @@ function escapeHtml(s: string | null | undefined): string {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
+// Mobile card view (samo <sm): kompaktan prikaz leada.
+// Prikazuje: naziv, status, grad, email/phone (ako postoji), M3 ocenu,
+// ikone za screenshot/website/DNC.
+function renderLeadCard(r: typeof items[number]): string {
+  const initials = (r.name ?? "")
+    .split(/\s+/)
+    .map((w) => w[0] ?? "")
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "?";
+  const statusHtml = r.statusName
+    ? `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium" style="background:${escapeHtml(r.statusColor ?? "#999")}1a;color:${escapeHtml(r.statusColor ?? "#999")}">${escapeHtml(r.statusName)}</span>`
+    : "";
+  const m3Html = r.m3Overall != null
+    ? `<span class="inline-flex h-5 min-w-[1.75rem] items-center justify-center rounded-full ${r.m3Overall >= 7 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : r.m3Overall >= 4 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"} px-1.5 text-[10px] font-semibold">M3 ${r.m3Overall}</span>`
+    : "";
+  const ratingHtml = r.googleRating != null
+    ? `<span class="text-[10px] text-muted-foreground">★ ${r.googleRating.toFixed(1)}${r.reviewsCount != null ? ` (${r.reviewsCount})` : ""}</span>`
+    : "";
+  const campaignHtml = r.campaignName
+    ? `<span class="text-[10px] text-muted-foreground">${escapeHtml(r.campaignName)}</span>`
+    : "";
+  return `<a href="/leads/${r.id}" class="block rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/40 hover:bg-accent/30 active:bg-accent/50">
+    <div class="flex items-start gap-2">
+      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/80 to-violet-500 text-[10px] font-bold text-primary-foreground">${escapeHtml(initials)}</div>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-sm font-semibold text-foreground">${escapeHtml(r.name ?? "—")}</div>
+            ${r.address ? `<div class="truncate text-[11px] text-muted-foreground">${escapeHtml(r.address)}</div>` : ""}
+          </div>
+          ${r.doNotContact ? `<span class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">DNC</span>` : ""}
+        </div>
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+          ${statusHtml}
+          ${m3Html}
+          ${ratingHtml}
+          ${campaignHtml}
+        </div>
+        <div class="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
+          ${r.city ? `<span>📍 ${escapeHtml(r.city)}</span>` : ""}
+          ${r.phoneE164 ? `<a href="tel:${escapeHtml(r.phoneE164)}" class="text-primary hover:underline" onclick="event.stopPropagation();event.preventDefault();window.location='tel:${escapeHtml(r.phoneE164)}'">📞 ${escapeHtml(r.phoneE164)}</a>` : ""}
+          ${r.email ? `<a href="mailto:${escapeHtml(r.email)}" class="text-primary hover:underline" onclick="event.stopPropagation()">✉</a>` : ""}
+          ${r.websiteNormalized ? `<a href="https://${escapeHtml(r.websiteNormalized)}" target="_blank" rel="noopener" class="text-primary hover:underline" onclick="event.stopPropagation()">🌐</a>` : ""}
+          ${r.hasScreenshot ? `<span class="text-emerald-600" title="Ima screenshot">📷</span>` : ""}
+        </div>
+      </div>
+    </div>
+  </a>`;
+}
+
 // Render jedne ćelije po ključu
 function renderCell(colKey: string, r: typeof items[number]): string {
   switch (colKey) {
@@ -225,46 +277,48 @@ const hasAnyFilter =
       />
     </PageHeader>
 
-    <div class="space-y-4 p-6">
+    <div class="space-y-4 p-4 md:p-6">
       <!-- FilterBar + collapsible advanced -->
       <Card>
-        <CardContent class="pt-6">
+        <CardContent class="pt-4 md:pt-6">
           <form method="get" class="space-y-4">
             <!-- Skriveno: sačuvaj sort -->
             <input type="hidden" name="sort" value={sortParam} />
 
             <!-- Osnovni filteri (uvek vidljivi) -->
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
               <input
                 type="text"
                 name="search"
                 value={filters.search}
                 placeholder="Pretraga…"
-                class="flex h-9 w-64 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                class="flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-64"
               />
-              <select name="statusId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <select name="statusId" class="flex h-11 w-full rounded-md border border-input bg-transparent px-2 text-sm sm:h-9 sm:w-auto">
                 <option value="">Status: svi</option>
                 <option value="null" selected={filters.statusId === "null"}>Bez statusa</option>
                 {statuses.map((s) => (
                   <option value={String(s.id)} selected={filters.statusId === String(s.id)}>{s.name}</option>
                 ))}
               </select>
-              <select name="campaignId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <select name="campaignId" class="flex h-11 w-full rounded-md border border-input bg-transparent px-2 text-sm sm:h-9 sm:w-auto">
                 <option value="">Kampanja: sve</option>
                 {campaigns.map((c) => (
                   <option value={String(c.id)} selected={filters.campaignId === String(c.id)}>{c.name}</option>
                 ))}
               </select>
-              <select name="city" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <select name="city" class="flex h-11 w-full rounded-md border border-input bg-transparent px-2 text-sm sm:h-9 sm:w-auto">
                 <option value="">Grad: svi</option>
                 {cities.map((c) => (
                   <option value={c} selected={filters.city === c}>{c}</option>
                 ))}
               </select>
-              <button type="submit" class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Filtriraj</button>
-              {hasAnyFilter && (
-                <a href={buildUrl({ sort: sortParam, page: null, search: null, statusId: null, campaignId: null, city: null, hasEmail: null, noWebsite: null, hasPhone: null, hasScreenshot: null, hasAnalysis: null, dnc: null, minScore: null, maxScore: null, minReviews: null, maxReviews: null, minRating: null, maxRating: null, source: null, importedFrom: null, importedTo: null, lastEmailStatus: null, category: null })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Reset</a>
-              )}
+              <div class="flex gap-2">
+                <button type="submit" class="inline-flex h-11 flex-1 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 sm:h-9 sm:flex-none">Filtriraj</button>
+                {hasAnyFilter && (
+                  <a href={buildUrl({ sort: sortParam, page: null, search: null, statusId: null, campaignId: null, city: null, hasEmail: null, noWebsite: null, hasPhone: null, hasScreenshot: null, hasAnalysis: null, dnc: null, minScore: null, maxScore: null, minReviews: null, maxReviews: null, minRating: null, maxRating: null, source: null, importedFrom: null, importedTo: null, lastEmailStatus: null, category: null })} class="inline-flex h-11 flex-1 items-center justify-center rounded-md border px-4 text-sm hover:bg-accent sm:h-9 sm:flex-none">Reset</a>
+                )}
+              </div>
             </div>
 
             <!-- Brzi filteri (toggle chip-ovi) — inline, vidljivi odmah -->
@@ -281,7 +335,8 @@ const hasAnyFilter =
 
       <!-- Tabela sa fiksnom visinom -->
       <Card class="overflow-hidden">
-        <div class="leads-table-wrapper overflow-auto" style="max-height: calc(100vh - 380px);">
+        <!-- Desktop/tablet: standardna tabela (≥sm = 640px) -->
+        <div class="leads-table-wrapper hidden overflow-auto sm:block" style="max-height: calc(100vh - 380px);">
           <table class="w-full text-sm">
             <thead class="sticky top-0 z-10 border-b bg-card text-xs uppercase tracking-wider text-muted-foreground shadow-sm">
               <tr>
@@ -326,6 +381,15 @@ const hasAnyFilter =
               ))}
             </tbody>
           </table>
+        </div>
+
+        <!-- Mobile: card stack (<sm = 640px) -->
+        <div class="space-y-2 p-3 sm:hidden">
+          {items.length === 0 ? (
+            <div class="px-4 py-12 text-center text-sm text-muted-foreground">Nema leadova za zadane filtere.</div>
+          ) : items.map((r) => (
+            <div set:html={renderLeadCard(r)} />
+          ))}
         </div>
 
         <!-- Paginacija (inline, ispod tabele) -->

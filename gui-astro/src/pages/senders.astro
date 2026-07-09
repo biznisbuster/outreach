@@ -69,12 +69,12 @@ if (Astro.request.method === "POST") {
 ---
 <AppLayout title="Senderi — Outreach">
   <div>
-    <div class="border-b px-6 py-4">
+    <div class="border-b px-4 py-3 md:px-6 md:py-4">
       <h1 class="text-xl font-bold tracking-tight">Senderi</h1>
       <p class="text-sm text-muted-foreground">{senders.length} SMTP konfiguracija</p>
     </div>
 
-    <div class="space-y-6 p-6">
+    <div class="space-y-6 p-4 md:p-6">
       {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
       {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 

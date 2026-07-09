@@ -17,6 +17,7 @@
  */
 
 @import "tailwindcss";
+@import "./mobile.css";
 
 /* ─────────────────────────────────────────────────────────────────────
  * THEME TOKENS (light = default)

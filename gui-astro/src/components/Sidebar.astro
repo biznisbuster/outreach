@@ -2,18 +2,30 @@
 /**
  * Sidebar — sectioned, collapsible sidebar.
  *
- * Sections:
- *   - Now:        Dashboard
- *   - Outreach:   Kampanje, Leadovi, Dodaj, Import, Queue, Inbox
- *   - Setup:      Senderi, Šabloni, Statusi, Podešavanja
- *   - Insights:   Audit
+ * Variants:
+ *   - "fixed" (default): desktop sidebar (240px, collapsible to 64px). Hidden <md.
+ *   - "drawer":           mobile drawer (fixed, full-height). Visible <md.
  *
- * Collapse state is in localStorage; SSR renders expanded state then JS shrinks.
+ * Sections:
+ *   - Sad:           Dashboard
+ *   - Outreach:      Kampanje, Leadovi, Red slanja, Inbox
+ *   - Podešavanje:   Senderi, Šabloni, Attachments, Statusi, Podešavanja
+ *   - Uvidi:         Audit log
+ *
+ * Collapse state (desktop) je u localStorage.
+ * Drawer state (mobile) živi u AppLayout-u (data-drawer-state="open|closed").
  */
 import { cn } from "~/lib/utils";
 import Icon from "./Icon.astro";
 import ThemeToggle from "./ThemeToggle.astro";
 
+interface Props {
+  variant?: "fixed" | "drawer";
+  class?: string;
+  id?: string;
+}
+
+const { variant = "fixed", class: cls = "", id } = Astro.props;
 const pathname = Astro.url.pathname;
 
 type Item = { href: string; label: string; icon: string; shortcut?: string };
@@ -57,11 +69,22 @@ function isActive(href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
 }
+
+const variantClasses = variant === "drawer"
+  ? "fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl safe-top safe-bottom"
+  : "hidden md:flex h-screen shrink-0 transition-[width] duration-200 ease-out";
 ---
 <aside
-  id="app-sidebar"
-  class="group/sidebar relative flex h-screen shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200 ease-out"
+  id={id ?? (variant === "drawer" ? "mobile-sidebar-drawer" : "app-sidebar")}
+  class:list={[
+    "group/sidebar flex flex-col border-r border-border bg-card",
+    variant === "drawer" ? "app-drawer" : "",
+    variantClasses,
+    cls,
+  ]}
+  data-sidebar-variant={variant}
   data-collapsed="false"
+  data-drawer-state={variant === "drawer" ? "closed" : undefined}
 >
   <!-- Header -->
   <div class="flex h-14 items-center justify-between gap-1 border-b border-border px-4" data-sidebar-header>
@@ -73,21 +96,33 @@ function isActive(href: string): boolean {
       </span>
       <span class="sidebar-label truncate text-lg font-bold tracking-tight">Outreach</span>
     </a>
-    <!-- Collapse toggle: UVEK vidljiv (čak i kad je collapsed).
-         Kad je otvoren, labela "Outreach" zauzima prostor — dugme ide desno.
-         Kad je collapsed, labele su sakrivene, dugme ostaje centrirano. -->
-    <button
-      id="sidebar-collapse"
-      type="button"
-      class="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      aria-label="Skrati sidebar"
-      title="Skrati sidebar"
-      data-collapse-toggle
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="m9 18 6-6-6-6"/>
-      </svg>
-    </button>
+    {variant === "fixed" ? (
+      <button
+        id="sidebar-collapse"
+        type="button"
+        class="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        aria-label="Skrati sidebar"
+        title="Skrati sidebar"
+        data-collapse-toggle
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m9 18 6-6-6-6"/>
+        </svg>
+      </button>
+    ) : (
+      <button
+        id="sidebar-drawer-close"
+        type="button"
+        class="ml-auto inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        aria-label="Zatvori meni"
+        title="Zatvori meni"
+        data-drawer-close
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+        </svg>
+      </button>
+    )}
   </div>
 
   <!-- Nav -->
@@ -141,8 +176,9 @@ function isActive(href: string): boolean {
     <!-- Theme toggle: uvek full width (expanded). Kad je collapsed, label nestaje ali ikona ostaje centrirana. -->
     <ThemeToggle expanded />
     <button
-      id="open-cmd-k"
+      id={variant === "drawer" ? "open-cmd-k-mobile" : "open-cmd-k"}
       type="button"
+      data-cmd-k-toggle
       class="sidebar-label flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
       aria-label="Otvori brzu navigaciju"
     >
@@ -181,7 +217,7 @@ function isActive(href: string): boolean {
   /* Smoothen icon centering when collapsed */
   #app-sidebar[data-collapsed="true"] .group\/link,
   /* Theme toggle expanded mode: centrira ikonu kad label nestane */
-  #app-sidebar[data-collapsed="true"] #theme-toggle { justify-content: center; padding-left: 0; padding-right: 0; }
+  #app-sidebar[data-collapsed="true"] [data-theme-toggle] { justify-content: center; padding-left: 0; padding-right: 0; }
   /* Header: kad je collapsed, centriraj collapse dugme (labela "Outreach" je sakrivena) */
   #app-sidebar[data-collapsed="true"] [data-sidebar-header] { justify-content: center; padding-left: 0; padding-right: 0; }
   /* Footer: kad je collapsed, centriraj sve full-width buttone */
@@ -190,46 +226,76 @@ function isActive(href: string): boolean {
 </style>
 
 <script is:inline>
+  // Sidebar skripta — radi za SVE instance (fixed + drawer).
+  // Idempotentan: koristi [data-sidebar-variant] kao scope marker.
   (function () {
-    var sidebar = document.getElementById("app-sidebar");
-    var collapseBtn = document.getElementById("sidebar-collapse");
-    var cmdBtn = document.getElementById("open-cmd-k");
+    var STORAGE_KEY = "app_sidebar_collapsed";
+    var sidebars = document.querySelectorAll("[data-sidebar-variant]");
 
-    function syncCollapseAria() {
-      if (!collapseBtn || !sidebar) return;
-      var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
-      collapseBtn.setAttribute("aria-label", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
-      collapseBtn.setAttribute("title", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
-    }
+    function isFixed(s) { return s.getAttribute("data-sidebar-variant") === "fixed"; }
+    function isDrawer(s) { return s.getAttribute("data-sidebar-variant") === "drawer"; }
 
-    function setCollapsed(collapsed) {
-      if (!sidebar) return;
-      sidebar.setAttribute("data-collapsed", collapsed ? "true" : "false");
-      try { localStorage.setItem("app_sidebar_collapsed", collapsed ? "1" : "0"); } catch (e) {}
-      syncCollapseAria();
-    }
+    sidebars.forEach(function (sidebar) {
+      var collapseBtn = sidebar.querySelector("[data-collapse-toggle]");
+      var closeBtn = sidebar.querySelector("[data-drawer-close]");
+      var cmdBtn = sidebar.querySelector("[data-cmd-k-toggle]");
+      var navLinks = sidebar.querySelectorAll("a[href]");
 
-    // Restore sidebar collapsed state from localStorage
-    try {
-      var stored = localStorage.getItem("app_sidebar_collapsed");
-      if (stored === "1") setCollapsed(true);
-      else syncCollapseAria();
-    } catch (e) {}
+      // === FIXED varijanta: desktop collapse ===
+      if (isFixed(sidebar)) {
+        function syncCollapseAria() {
+          if (!collapseBtn) return;
+          var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
+          collapseBtn.setAttribute("aria-label", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
+          collapseBtn.setAttribute("title", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
+        }
+        function setCollapsed(collapsed) {
+          sidebar.setAttribute("data-collapsed", collapsed ? "true" : "false");
+          try { localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0"); } catch (e) {}
+          syncCollapseAria();
+        }
+        try {
+          var stored = localStorage.getItem(STORAGE_KEY);
+          if (stored === "1") setCollapsed(true);
+          else syncCollapseAria();
+        } catch (e) {}
+        if (collapseBtn) {
+          collapseBtn.addEventListener("click", function () {
+            var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
+            setCollapsed(!isCollapsed);
+          });
+        }
+      }
 
-    // Toggle sidebar collapse
-    if (collapseBtn) {
-      collapseBtn.addEventListener("click", function () {
-        if (!sidebar) return;
-        var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
-        setCollapsed(!isCollapsed);
-      });
-    }
+      // === DRAWER varijanta: close handlers ===
+      if (isDrawer(sidebar)) {
+        if (closeBtn) {
+          closeBtn.addEventListener("click", function () {
+            if (typeof window.__mobileDrawerClose === "function") window.__mobileDrawerClose();
+          });
+        }
+        // Close drawer when navigating
+        navLinks.forEach(function (a) {
+          a.addEventListener("click", function () {
+            // Skip if it's an external link or anchor
+            var href = a.getAttribute("href");
+            if (!href || href.startsWith("#") || href.startsWith("http")) return;
+            // Skip modifier-click (open in new tab)
+            if (a.target === "_blank") return;
+            // Mali delay da navigation krene, pa drawer se zatvori
+            setTimeout(function () {
+              if (typeof window.__mobileDrawerClose === "function") window.__mobileDrawerClose();
+            }, 0);
+          });
+        });
+      }
 
-    // Open command palette (theme toggle has its own inline script inside <ThemeToggle />)
-    if (cmdBtn) {
-      cmdBtn.addEventListener("click", function () {
-        if (typeof window.__openCommandPalette === "function") window.__openCommandPalette();
-      });
-    }
+      // === Zajedničko: cmd-k trigger (postoji u oba) ===
+      if (cmdBtn) {
+        cmdBtn.addEventListener("click", function () {
+          if (typeof window.__openCommandPalette === "function") window.__openCommandPalette();
+        });
+      }
+    });
   })();
 </script>

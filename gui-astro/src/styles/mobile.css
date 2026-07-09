@@ -1,0 +1,221 @@
+/*
+ * Outreach GUI — mobile-specific styles.
+ *
+ * Mobile-first: klase u ovom fajlu su default za <md uređaje,
+ * a `md:` prefiks targetira tablet/desktop.
+ *
+ * Šta pokrivamo:
+ *  1. Touch-friendly tap targets (min 44x44 px po Apple HIG / WCAG)
+ *  2. Safe area insets (notched phones: iPhone X+, Pixel 6+, itd.)
+ *  3. Hover-state guard na touch uređajima (nema "sticky hover")
+ *  4. iOS Safari 100dvh helper (adress bar ne pojede ekran)
+ *  5. Mobile drawer state klase (slide-in / out)
+ *  6. Hibrid table: card view <sm, table view ≥sm
+ */
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 1. Touch tap targets
+ *    Apple HIG preporučuje 44x44 px za primarne akcije.
+ *    WCAG 2.5.5 (AAA) zahteva 44x44. Mi idemo sa 44px minimum
+ *    za dugmad, linkove u listama, i forme inpute.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  /* Touch uređaji: forsiraj min-height na interaktivne elemente */
+  .touch-target,
+  button:not(.no-touch-bump):not([data-no-touch-bump]),
+  a[role="button"]:not(.no-touch-bump),
+  input[type="submit"]:not(.no-touch-bump),
+  input[type="button"]:not(.no-touch-bump),
+  [role="button"]:not(.no-touch-bump) {
+    min-height: 44px;
+  }
+
+  /* Inline linkovi u tekstu NE smeju da budu 44px (čita se glupo) */
+  p a:not(.touch-target),
+  li a:not(.touch-target):not([role="button"]) {
+    min-height: 0;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 2. Safe area insets — notched phones
+ * ──────────────────────────────────────────────────────────────────── */
+.safe-x      { padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+.safe-top    { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+.safe-pt     { padding-top: max(0px, env(safe-area-inset-top)); }
+.safe-pb     { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+.safe-pl     { padding-left: max(0px, env(safe-area-inset-left)); }
+.safe-pr     { padding-right: max(0px, env(safe-area-inset-right)); }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 3. Hover guard za touch
+ *    Na touch uređajima :hover ostaje "lepljiv" nakon tap-a,
+ *    što vizuelno smeta. Gasimo hover state za touch uređaje.
+ *    Desktop-only hover efekti (.card-hover:hover) i dalje rade
+ *    jer je u AppLayout već samo CSS.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (hover: none) {
+  /* Statično: ukloni hover efekte koji nemaju alternativu */
+  .hover-bg-accent:hover,
+  .hover-text-foreground:hover {
+    background-color: inherit;
+    color: inherit;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 4. iOS Safari 100dvh
+ *    `height: 100vh` na iOS Safari uključuje address bar (URL bar),
+ *    pa se pravi layout pomera. `100dvh` ("dynamic viewport height")
+ *    re-racuva kada se URL bar sakrije/pokaže.
+ *    Koristimo .h-dvh umesto .h-screen za mobile drawer i fullscreen modale.
+ * ──────────────────────────────────────────────────────────────────── */
+.h-dvh { height: 100vh; height: 100dvh; }
+.min-h-dvh { min-height: 100vh; min-height: 100dvh; }
+.max-h-dvh { max-height: 100vh; max-height: 100dvh; }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 5. Mobile drawer state
+ *    Drawer je uvek u DOM-u; transform ga pomera van ekrana.
+ *    .drawer-state-closed je default, .drawer-state-open ga vuče nazad.
+ * ──────────────────────────────────────────────────────────────────── */
+.app-drawer {
+  transition: transform var(--transition-base) var(--ease-out);
+  will-change: transform;
+}
+.app-drawer[data-drawer-state="closed"] {
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+.app-drawer[data-drawer-state="open"] {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.app-drawer-backdrop {
+  transition: opacity var(--transition-base) var(--ease-out);
+  will-change: opacity;
+}
+.app-drawer-backdrop[data-backdrop-state="closed"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.app-drawer-backdrop[data-backdrop-state="open"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 6. Hibrid table view
+ *    <div data-view="mobile"> vidi se samo <sm
+ *    <div data-view="desktop"> vidi se samo ≥sm
+ *    Koristi se umesto .sm:hidden / .hidden .sm:block jer je
+ *    eksplicitnije i lako se debagira.
+ * ──────────────────────────────────────────────────────────────────── */
+[data-view="mobile"] { display: block; }
+[data-view="desktop"] { display: none; }
+
+@media (min-width: 640px) {
+  [data-view="mobile"]  { display: none; }
+  [data-view="desktop"] { display: block; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 7. Touch-friendly PageHeader akcije
+ *    Na mobilnom, dugmad u PageHeader-u moraju biti barem 44px.
+ *    Desktop zadržava 36px (kompaktan layout).
+ * ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .page-header-actions button,
+  .page-header-actions a[role="button"],
+  .page-header-actions [data-button] {
+    min-height: 44px;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 8. Sticky elements guard
+ *    Na mobilnom, sticky page header / sticky tab bar može da
+ *    pojede previše vertikalnog prostora. Držimo sticky samo ≥md.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .md-sticky-only {
+    position: static !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 9. Modal fullscreen helper
+ *    Na <md, modal postaje full-screen umesto floating kartice.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .modal-fullscreen-md {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 10. Mobile typography tweak
+ *     Long content bude čitljiviji na telefonu ako je veći line-height.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  .prose-mobile p,
+  .prose-mobile li {
+    line-height: 1.6;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 11. Reduce horizontal overflow na mobilnom
+ *     Ako se pojavi (npr. dug kod URL-a, duga reč), ovo ga drži
+ *     unutar kontejnera.
+ * ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  body, html {
+    overflow-x: hidden;
+  }
+  .no-mobile-overflow {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 12. Visually hidden, ali dostupan screen reader-ima
+ * ──────────────────────────────────────────────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * 13. Body scroll lock (npr. dok je drawer otvoren)
+ *     Koristimo klasu umesto inline style da bi multi-source
+ *     (drawer + lightbox) mogli da koegzistiraju.
+ * ─────────────────────────────────────────────────────────────────── */
+body.no-scroll {
+  overflow: hidden;
+  touch-action: none;
+}

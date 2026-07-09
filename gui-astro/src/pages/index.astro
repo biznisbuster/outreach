@@ -111,12 +111,12 @@ const kpis = [
 ---
 <AppLayout title="Dashboard — Outreach">
   <div>
-    <div class="border-b px-6 py-4">
-      <h1 class="text-xl font-bold tracking-tight">Dashboard</h1>
-      <p class="text-sm text-muted-foreground">Pregled aktivnosti i to-do za danas</p>
+    <div class="border-b px-4 py-3 md:px-6 md:py-4">
+      <h1 class="text-lg font-bold tracking-tight md:text-xl">Dashboard</h1>
+      <p class="text-xs text-muted-foreground md:text-sm">Pregled aktivnosti i to-do za danas</p>
     </div>
 
-    <div class="space-y-6 px-6 pt-6 pb-10">
+    <div class="space-y-6 px-4 pt-5 pb-8 md:px-6 md:pt-6 md:pb-10">
       <!-- KPI -->
       <div class="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((k) => <KpiCard {...k} />)}

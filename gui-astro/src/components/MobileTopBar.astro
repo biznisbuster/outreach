@@ -1,0 +1,93 @@
+---
+/**
+ * MobileTopBar — fiksni gornji bar, vidljiv samo <md.
+ *
+ * Sadrži:
+ *  - Hamburger (levo) — otvara drawer (Sidebar u drawer modu)
+ *  - Brend (centar)
+ *  - Search (Cmd+K) i Theme toggle (desno)
+ *
+ * Body layout:
+ *   <MobileTopBar />      ← fixed, vidljiv <md
+ *   <main class="pt-14 md:pt-0">...</main>  ← pomjeren dole za height topbara
+ *
+ * Drawer state je u AppLayout-u; ovde samo šaljemo "open" event.
+ */
+import ThemeToggle from "./ThemeToggle.astro";
+
+interface Props {
+  brandName?: string;
+}
+const { brandName = "Outreach" } = Astro.props;
+---
+<header
+  id="mobile-topbar"
+  class="md:hidden fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-card/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-card/80 safe-top"
+  role="banner"
+>
+  <!-- Hamburger -->
+  <button
+    id="mobile-sidebar-toggle"
+    type="button"
+    class="touch-target inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+    aria-label="Otvori meni"
+    aria-controls="mobile-sidebar-drawer"
+    aria-expanded="false"
+    data-drawer-toggle
+  >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="3" x2="21" y1="6" y2="6"/>
+      <line x1="3" x2="21" y1="12" y2="12"/>
+      <line x1="3" x2="21" y1="18" y2="18"/>
+    </svg>
+  </button>
+
+  <!-- Brand (centar) -->
+  <a href="/" class="flex min-w-0 flex-1 items-center justify-center gap-2">
+    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-sm shadow-primary/30">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+      </svg>
+    </span>
+    <span class="truncate text-base font-bold tracking-tight">{brandName}</span>
+  </a>
+
+  <!-- Actions (desno) -->
+  <div class="flex shrink-0 items-center gap-1">
+    <!-- Cmd+K search trigger -->
+    <button
+      id="mobile-open-cmd-k"
+      type="button"
+      class="touch-target inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+      aria-label="Otvori brzu pretragu"
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+    </button>
+    <!-- Theme toggle (kompakt, ikona samo) -->
+    <ThemeToggle compact />
+  </div>
+</header>
+
+<script is:inline>
+  (function () {
+    // Wire hamburger toggle to AppLayout's openDrawer/closeDrawer (defined inline there)
+    var btn = document.getElementById("mobile-sidebar-toggle");
+    var cmdBtn = document.getElementById("mobile-open-cmd-k");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        if (typeof window.__mobileDrawerToggle === "function") {
+          window.__mobileDrawerToggle();
+        }
+      });
+    }
+    if (cmdBtn) {
+      cmdBtn.addEventListener("click", function () {
+        if (typeof window.__openCommandPalette === "function") {
+          window.__openCommandPalette();
+        }
+      });
+    }
+  })();
+</script>
