@@ -83,7 +83,7 @@ if (Astro.request.method === "POST") {
           <CardTitle class="text-base">+ Novi sender</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="POST" class="grid grid-cols-2 gap-3">
+          <form method="POST" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input type="hidden" name="op" value="create" />
             <input name="email" type="email" required placeholder="email@tvoidomen.rs" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
             <input name="fromName" required placeholder="Ime pošiljaoca" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
@@ -106,8 +106,8 @@ if (Astro.request.method === "POST") {
       </Card>
 
       <Card>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
+        <div class="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+          <table class="w-full min-w-[640px] text-sm">
             <thead class="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th class="px-4 py-2">Email</th>

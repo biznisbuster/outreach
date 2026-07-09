@@ -176,7 +176,8 @@ const maxCount = Math.max(1, ...Object.values(counts));
         ))}
       </div>
 
-      <!-- Tabela -->
+      <!-- Tabela (≥sm) -->
+      <div class="hidden sm:block">
       <Table padded>
         <thead class="border-b border-border bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground">
           <tr>
@@ -283,6 +284,56 @@ const maxCount = Math.max(1, ...Object.values(counts));
           )}
         </tbody>
       </Table>
+      </div>
+
+      <!-- Mobile card stack (<sm) -->
+      <div class="space-y-2 sm:hidden">
+        {items.length === 0 ? (
+          <EmptyState
+            icon="inbox"
+            title="Nema emailova u ovom filteru"
+            description={
+              statusFilter === "open"
+                ? "Nema emailova u statusima Skica, U redu ili Šalje se. Sve je završeno ili nije zakazano."
+                : "Promeni filter ili pokreni tick da generišeš nove emailove."
+            }
+          />
+        ) : items.map((it) => {
+          const meta = queueStatusMeta(it.emailSend.status);
+          const queuedIso = it.emailSend.queuedAt ? new Date(it.emailSend.queuedAt).toISOString() : "";
+          return (
+            <a href={`/leads/${it.emailSend.leadId}`} class="block rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/40 hover:bg-accent/30 active:bg-accent/50">
+              <div class="flex items-start gap-2">
+                <Avatar name={it.leadName} size={36} />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="truncate text-sm font-semibold text-foreground">
+                        {it.leadName ?? `#${it.emailSend.leadId}`}
+                      </div>
+                      <div class="truncate text-[11px] text-muted-foreground">{it.leadEmail ?? "—"}</div>
+                    </div>
+                    {meta ? <StatusBadge name={meta.label} color={meta.color} size="sm" /> : null}
+                  </div>
+                  <div class="mt-1 truncate text-xs text-foreground/80">
+                    {it.emailSend.subject || <span class="text-muted-foreground">Bez subjekta</span>}
+                  </div>
+                  <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    {it.senderEmail && <span class="font-mono">✉ {it.senderEmail}</span>}
+                    {it.campaignName && <span>· {it.campaignName}</span>}
+                    {queuedIso && (
+                      <span>· {formatDate(it.emailSend.queuedAt)}</span>
+                    )}
+                    {it.emailSend.replied && (
+                      <span class="font-medium text-success">✓ Odgovor</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
     </div>
   </div>
 </AppLayout>

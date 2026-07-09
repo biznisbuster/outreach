@@ -54,7 +54,7 @@ const items = db
 ---
 <AppLayout title="Statusi — Outreach">
   <div>
-    <div class="border-b border-border bg-card px-6 py-4">
+    <div class="border-b border-border bg-card px-4 py-3 md:px-6 md:py-4">
       <h1 class="text-xl font-bold tracking-tight">Statusi</h1>
       <p class="text-sm text-muted-foreground">
         Upravljanje pipeline statusima. Koristi se u leadima, sekvencama, dashboardu.
@@ -148,6 +148,7 @@ const items = db
               description="Kreiraj prvi status u formi iznad. Biće dostupan u dropdown-ima svuda."
             />
           ) : (
+            <div class="hidden sm:block">
             <Table hoverable>
               <thead class="border-b border-border bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
@@ -221,6 +222,53 @@ const items = db
                 })}
               </tbody>
             </Table>
+            </div>
+          )}
+
+          {/* Mobile card view (<sm) */}
+          {items.length > 0 && (
+            <div class="space-y-2 sm:hidden">
+              {items.map((r) => {
+                const s = r.status;
+                const tip = s.isTerminalWon ? "Won ✓" : s.isTerminalLost ? "Lost ✗" : "Aktivan";
+                return (
+                  <div class="rounded-lg border border-border bg-card p-3">
+                    <div class="flex items-start gap-2">
+                      <span class="block h-6 w-6 shrink-0 rounded-full ring-2 ring-background shadow-xs" style={`background:${s.color}`} aria-hidden="true" />
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                          <StatusBadge name={s.name} color={s.color} isTerminalWon={s.isTerminalWon} isTerminalLost={s.isTerminalLost} size="sm" />
+                          {s.systemDefault && (
+                            <span class="rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Sistemski</span>
+                          )}
+                        </div>
+                        <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                          <span>{tip}</span>
+                          <span>Sort: <span class="tabular-nums text-foreground">{s.sortOrder}</span></span>
+                          <span><span class="tabular-nums text-foreground">{Number(r.used)}</span> leadova</span>
+                        </div>
+                        {!s.systemDefault && (
+                          <form
+                            method="POST"
+                            onsubmit={`return confirm('Obrisati status "${s.name}"?') || event.preventDefault()`}
+                            class="mt-2"
+                          >
+                            <input type="hidden" name="op" value="delete" />
+                            <input type="hidden" name="id" value={String(s.id)} />
+                            <button
+                              type="submit"
+                              class="inline-flex h-9 items-center rounded-md border border-destructive/30 px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                            >
+                              Obriši
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>

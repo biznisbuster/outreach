@@ -161,7 +161,7 @@ function buildInboxUrl(overrides: { campaignId?: string; period?: string }): str
           <select
             name="campaignId"
             onchange="this.form.submit()"
-            class="flex h-8 max-w-[200px] truncate rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            class="flex h-11 w-full max-w-[200px] truncate rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-8 sm:text-xs"
           >
             <option value="">Sve kampanje</option>
             {campaigns.map((c) => (

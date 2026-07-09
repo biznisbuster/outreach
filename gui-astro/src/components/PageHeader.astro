@@ -51,7 +51,7 @@ const SIZE = {
   hero: { wrap: "px-4 pt-6 pb-4 md:px-6 md:pt-8 md:pb-6", title: "text-2xl md:text-3xl", subtitle: "text-sm md:text-base" },
 };
 const s = SIZE[size];
-const stickCls = sticky ? "sticky top-0 z-30 glass border-b border-border" : "border-b border-border bg-card/60 backdrop-blur-sm";
+const stickCls = sticky ? "md-sticky-only md:sticky md:top-0 z-30 glass border-b border-border" : "border-b border-border bg-card/60 backdrop-blur-sm";
 ---
 <header class={`${stickCls} ${sticky ? "" : ""} ${s.wrap} ${cls}`}>
   {backHref ? (

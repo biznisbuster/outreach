@@ -68,7 +68,7 @@ function mimeBadge(mime: string): string {
           <form id="upload-form" class="space-y-3">
             <label
               id="dropzone"
-              class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 px-6 py-10 text-center transition-colors hover:bg-muted/50"
+              class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-8 text-center transition-colors hover:bg-muted/50 md:px-6 md:py-10"
             >
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-2 text-muted-foreground">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
@@ -96,8 +96,8 @@ function mimeBadge(mime: string): string {
               Nema attachment-a. Upload-uj prvi iznad.
             </div>
           ) : (
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
+            <div class="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+              <table class="w-full min-w-[640px] text-sm">
                 <thead class="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th class="px-3 py-2">Ime</th>

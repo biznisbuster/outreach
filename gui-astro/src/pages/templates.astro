@@ -107,8 +107,8 @@ function formatSize(b: number): string {
         <CardContent>
           <form method="POST" class="space-y-3">
             <input type="hidden" name="op" value="create" />
-            <input name="name" required placeholder="Naziv šablona" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
-            <textarea name="body" required rows="6" placeholder="Telo šablona…" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"></textarea>
+            <input name="name" required placeholder="Naziv šablona" class="flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm sm:h-9" />
+            <textarea name="body" required rows="6" placeholder="Telo šablona…" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs sm:text-xs"></textarea>
             <div class="flex justify-end">
               <button class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Dodaj</button>
             </div>
