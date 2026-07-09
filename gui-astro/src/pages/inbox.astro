@@ -1,0 +1,302 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import PageHeader from "../components/PageHeader.astro";
+import Banner from "../components/Banner.astro";
+import Avatar from "../components/Avatar.astro";
+import EmptyState from "../components/EmptyState.astro";
+import Button from "../components/Button.astro";
+import ReplyRow from "../components/ReplyRow.astro";
+import { getDb, schema } from "../lib/db";
+import { asc, desc, eq, gte, and, inArray } from "drizzle-orm";
+import { formatDate, timeAgo } from "../lib/utils";
+
+const db = getDb();
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+
+if (Astro.request.method === "POST") {
+  try {
+    const { pollImap } = await import("../lib/email/imap");
+    const r = await pollImap();
+    return Astro.redirect(
+      `/inbox?ok=${encodeURIComponent(`IMAP poll: matched=${r.matched}`)}`,
+      303,
+    );
+  } catch (e) {
+    return Astro.redirect(
+      `/inbox?error=${encodeURIComponent("IMAP greška: " + (e as Error).message)}`,
+      303,
+    );
+  }
+}
+
+const url = Astro.url;
+const campaignFilter = url.searchParams.get("campaignId") ?? "";
+const periodFilter = url.searchParams.get("period") ?? "all";
+
+// Filter po kampanji (preko lead.campaignId)
+const conds = [];
+if (campaignFilter) {
+  const leadIdsInCampaign = db
+    .select({ id: schema.leads.id })
+    .from(schema.leads)
+    .where(eq(schema.leads.campaignId, Number(campaignFilter)))
+    .all()
+    .map((r) => r.id);
+  if (leadIdsInCampaign.length > 0) {
+    conds.push(inArray(schema.emailReplies.leadId, leadIdsInCampaign));
+  } else {
+    conds.push(eq(schema.emailReplies.id, -1)); // forsiraj prazan rezultat
+  }
+}
+// Vremenski filter
+const PERIOD_DAYS: Record<string, number> = { "1d": 1, "7d": 7, "30d": 30 };
+if (periodFilter !== "all" && PERIOD_DAYS[periodFilter]) {
+  const cutoff = new Date(Date.now() - PERIOD_DAYS[periodFilter] * 86400000);
+  conds.push(gte(schema.emailReplies.receivedAt, cutoff));
+}
+
+const where = conds.length ? and(...conds) : undefined;
+
+const repliesRaw = db
+  .select({
+    reply: schema.emailReplies,
+    leadName: schema.leads.name,
+    campaignId: schema.leads.campaignId,
+    campaignName: schema.campaigns.name,
+  })
+  .from(schema.emailReplies)
+  .leftJoin(schema.leads, eq(schema.leads.id, schema.emailReplies.leadId))
+  .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.leads.campaignId))
+  .where(where)
+  .orderBy(desc(schema.emailReplies.receivedAt))
+  .limit(500)
+  .all();
+
+// Grupisanje po leadu (server-side)
+type ReplyRowData = (typeof repliesRaw)[number];
+type Group = {
+  leadId: number;
+  leadName: string | null;
+  campaignName: string | null;
+  latestAt: number;
+  replies: ReplyRowData[];
+};
+const groupsMap = new Map<number, Group>();
+for (const r of repliesRaw) {
+  const id = r.reply.leadId;
+  if (!groupsMap.has(id)) {
+    groupsMap.set(id, {
+      leadId: id,
+      leadName: r.leadName,
+      campaignName: r.campaignName,
+      latestAt: 0,
+      replies: [],
+    });
+  }
+  const g = groupsMap.get(id)!;
+  g.replies.push(r);
+  const ts = r.reply.receivedAt ? new Date(r.reply.receivedAt).getTime() : 0;
+  if (ts > g.latestAt) g.latestAt = ts;
+}
+const groups = [...groupsMap.values()].sort((a, b) => b.latestAt - a.latestAt);
+const totalReplies = repliesRaw.length;
+
+const campaigns = db
+  .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+  .from(schema.campaigns)
+  .orderBy(asc(schema.campaigns.name))
+  .all();
+
+const PERIODS = [
+  { key: "1d", label: "Danas" },
+  { key: "7d", label: "7 dana" },
+  { key: "30d", label: "30 dana" },
+  { key: "all", label: "Sve" },
+];
+
+const hasFilter = Boolean(campaignFilter) || periodFilter !== "all";
+
+function buildInboxUrl(overrides: { campaignId?: string; period?: string }): string {
+  const params = new URLSearchParams();
+  const cid = overrides.campaignId ?? campaignFilter;
+  const per = overrides.period ?? periodFilter;
+  if (cid) params.set("campaignId", cid);
+  if (per && per !== "all") params.set("period", per);
+  const qs = params.toString();
+  return qs ? `/inbox?${qs}` : "/inbox";
+}
+---
+<AppLayout title="Inbox — Outreach">
+  <div>
+    <PageHeader
+      title="Inbox"
+      subtitle={
+        totalReplies === 0
+          ? "Nema odgovora"
+          : `${totalReplies} odgovora · ${groups.length} ${groups.length === 1 ? "lead" : "leadova"}`
+      }
+      sticky
+    >
+      <form method="POST" slot="actions">
+        <Button type="submit" variant="primary" icon="mail">
+          Poll IMAP sad
+        </Button>
+      </form>
+    </PageHeader>
+
+    <div class="space-y-6 p-6">
+      {ok && <Banner kind="success" message={ok} dismissible />}
+      {error && <Banner kind="error" message={error} dismissible />}
+
+      <!-- Filteri: kampanja (select) + period (chip) -->
+      <form
+        method="GET"
+        class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-xs"
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Kampanja
+          </span>
+          <select
+            name="campaignId"
+            onchange="this.form.submit()"
+            class="flex h-8 max-w-[200px] truncate rounded-md border border-input bg-background px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">Sve kampanje</option>
+            {campaigns.map((c) => (
+              <option value={String(c.id)} selected={campaignFilter === String(c.id)}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <span class="hidden h-5 w-px bg-border sm:inline-block" aria-hidden="true" />
+
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Period
+          </span>
+          <div class="flex flex-wrap items-center gap-1">
+            {PERIODS.map((p) => (
+              <a
+                href={buildInboxUrl({ period: p.key })}
+                class:list={[
+                  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors press",
+                  periodFilter === p.key
+                    ? "border-primary bg-primary-soft text-primary"
+                    : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+                ]}
+                aria-current={periodFilter === p.key ? "page" : undefined}
+              >
+                {p.label}
+              </a>
+            ))}
+          </div>
+        </div>
+
+        {hasFilter && (
+          <a
+            href="/inbox"
+            class="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="Resetuj filtere"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+            </svg>
+            Resetuj
+          </a>
+        )}
+      </form>
+
+      <!-- Reply grupe (po leadu) -->
+      {groups.length === 0 ? (
+        <EmptyState
+          icon="inbox"
+          title={hasFilter ? "Nema odgovora za zadane filtere" : "Nema odgovora"}
+          description={
+            hasFilter
+              ? "Pokušaj sa širim periodom ili drugom kampanjom."
+              : "Podesi IMAP u Podešavanja i klikni 'Poll IMAP sad' da uvezeš reply-jeve sa senderskih inbox-ova."
+          }
+          cta={hasFilter ? undefined : { href: "/settings", label: "Otvori podešavanja" }}
+        />
+      ) : (
+        <div class="space-y-3">
+          {groups.map((g) => {
+            const [latest, ...older] = g.replies;
+            return (
+              <article class="overflow-hidden rounded-lg border border-border bg-card shadow-xs transition-all duration-150 hover:border-primary/30 hover:shadow-sm">
+                <!-- Lead header -->
+                <header class="flex items-center gap-3 border-b border-border bg-muted/20 px-4 py-3">
+                  <Avatar name={g.leadName} size={36} />
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <a
+                        href={`/leads/${g.leadId}`}
+                        class="truncate text-sm font-semibold text-foreground transition-colors hover:text-primary"
+                      >
+                        {g.leadName ?? `#${g.leadId}`}
+                      </a>
+                      {g.replies.length > 1 && (
+                        <span class="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                          {g.replies.length} odgovora
+                        </span>
+                      )}
+                    </div>
+                    <div class="truncate text-xs text-muted-foreground">
+                      {g.campaignName ?? "Bez kampanje"}
+                    </div>
+                  </div>
+                  <div class="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
+                    <time
+                      datetime={new Date(g.latestAt).toISOString()}
+                      title={formatDate(new Date(g.latestAt))}
+                    >
+                      {timeAgo(new Date(g.latestAt))}
+                    </time>
+                  </div>
+                </header>
+
+                <!-- Najnoviji reply (uvek vidljiv) -->
+                <ReplyRow reply={latest.reply} />
+
+                <!-- Stariji reply-jevi (collapsible) -->
+                {older.length > 0 && (
+                  <details class="group/older border-t border-border bg-muted/10">
+                    <summary class="flex cursor-pointer items-center justify-between px-4 py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+                      <span class="flex items-center gap-1.5">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="transition-transform group-open/older:rotate-90"
+                          aria-hidden="true"
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                        {older.length} {older.length === 1 ? "stariji odgovor" : "starijih odgovora"}
+                      </span>
+                      <span class="text-[10px] uppercase tracking-wider opacity-70">
+                        Klikni za prikaz
+                      </span>
+                    </summary>
+                    <div class="divide-y divide-border">
+                      {older.map((r) => <ReplyRow reply={r.reply} compact />)}
+                    </div>
+                  </details>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </div>
+</AppLayout>

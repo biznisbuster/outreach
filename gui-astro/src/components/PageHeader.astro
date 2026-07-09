@@ -1,0 +1,97 @@
+---
+/**
+ * PageHeader — consistent page top with title + subtitle + breadcrumbs + actions.
+ *
+ * <PageHeader
+ *   title="Podešavanja"
+ *   subtitle="DB-backed runtime konfiguracija"
+ *   backHref="/"
+ *   backLabel="Nazad"
+ * >
+ *   <Button slot="actions" variant="primary" type="submit">Sačuvaj sve</Button>
+ * </PageHeader>
+ *
+ * Slots:
+ *   - default:   area between subtitle and actions (rarely used)
+ *   - actions:   button group on the right
+ *   - meta:      small print below subtitle (e.g. last-updated time)
+ */
+import Icon from "./Icon.astro";
+
+interface Crumb {
+  label: string;
+  href?: string;
+}
+
+interface Props {
+  title: string;
+  subtitle?: string;
+  breadcrumbs?: Crumb[];
+  backHref?: string;
+  backLabel?: string;
+  sticky?: boolean;
+  size?: "default" | "compact" | "hero";
+  class?: string;
+}
+
+const {
+  title,
+  subtitle,
+  breadcrumbs = [],
+  backHref,
+  backLabel,
+  sticky = false,
+  size = "default",
+  class: cls = "",
+} = Astro.props;
+
+const SIZE = {
+  compact: { wrap: "px-5 py-3", title: "text-lg", subtitle: "text-xs" },
+  default: { wrap: "px-6 py-4", title: "text-xl", subtitle: "text-sm" },
+  hero: { wrap: "px-6 pt-8 pb-6", title: "text-3xl", subtitle: "text-base" },
+};
+const s = SIZE[size];
+const stickCls = sticky ? "sticky top-0 z-30 glass border-b border-border" : "border-b border-border bg-card/60 backdrop-blur-sm";
+---
+<header class={`${stickCls} ${sticky ? "" : ""} ${s.wrap} ${cls}`}>
+  {backHref ? (
+    <a href={backHref} class="mb-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>
+      </svg>
+      <span>{backLabel ?? "Nazad"}</span>
+    </a>
+  ) : null}
+
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div class="min-w-0 flex-1">
+      {breadcrumbs.length > 0 && (
+        <nav aria-label="Breadcrumb" class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+          {breadcrumbs.map((c, i) => (
+            <>
+              {i > 0 && <span aria-hidden="true">/</span>}
+              {c.href ? (
+                <a href={c.href} class="hover:text-foreground">{c.label}</a>
+              ) : (
+                <span aria-current="page" class="text-foreground">{c.label}</span>
+              )}
+            </>
+          ))}
+        </nav>
+      )}
+      <h1 class={`font-bold tracking-tight ${s.title}`}>{title}</h1>
+      {subtitle && <p class={`mt-0.5 text-muted-foreground ${s.subtitle}`}>{subtitle}</p>}
+      <slot name="meta" />
+    </div>
+    {Astro.slots.has("actions") && (
+      <div class="flex flex-wrap items-center gap-2">
+        <slot name="actions" />
+      </div>
+    )}
+  </div>
+  {Astro.slots.has("default") && (
+    <div class="mt-4">
+      <slot />
+    </div>
+  )}
+</header>

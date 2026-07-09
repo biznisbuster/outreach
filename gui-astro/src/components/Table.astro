@@ -1,0 +1,53 @@
+---
+/**
+ * Table — wrapping div for any <table>, applies consistent chrome.
+ *
+ * <Table hoverable stickyHead>
+ *   <table class="w-full text-sm">
+ *     <thead class="border-b border-border bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground">
+ *       <tr><th class="px-4 py-2.5">…</th></tr>
+ *     </thead>
+ *     <tbody class="divide-y divide-border">
+ *       <tr class="transition-colors hover:bg-muted/40">…</tr>
+ *     </tbody>
+ *   </table>
+ * </Table>
+ *
+ * Why this style: Astro's named-slot pattern with <thead> + <tbody> is fragile
+ * (some browsers treat it as a flow element). Simpler to let the page author
+ * write the actual <table> inside; we just provide chrome.
+ *
+ * Props:
+ *   - hoverable: subtle row hover (apply via CSS variable on tbody below)
+ *   - padded:    default cell padding for th/td (.table-padded th/td)
+ *   - compact:   tighter padding (.table-compact th/td)
+ *   - class:     outer wrapper classes
+ */
+interface Props {
+  padded?: boolean;
+  compact?: boolean;
+  hoverable?: boolean;
+  class?: string;
+}
+const { padded, compact, hoverable = true, class: cls = "" } = Astro.props;
+
+const padClass = padded ? "table-padded" : compact ? "table-compact" : "";
+---
+<div class={`overflow-x-auto rounded-lg border border-border bg-card shadow-xs ${cls}`}>
+  <table
+    class={`w-full text-sm ${padClass}`}
+    data-hoverable={hoverable ? "true" : "false"}
+  >
+    <slot />
+  </table>
+</div>
+
+<style is:global>
+  .table-padded th,
+  .table-padded td { padding-left: 1rem; padding-right: 1rem; padding-top: 0.875rem; padding-bottom: 0.875rem; }
+  .table-compact th,
+  .table-compact td { padding-left: 0.75rem; padding-right: 0.75rem; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  table[data-hoverable="true"] tbody tr { transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1); }
+  table[data-hoverable="true"] tbody tr:hover { background-color: hsl(220 16% 96% / 0.5); }
+  :root.dark table[data-hoverable="true"] tbody tr:hover { background-color: hsl(222 32% 16% / 0.5); }
+</style>

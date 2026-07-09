@@ -1,0 +1,48 @@
+---
+/**
+ * StatusBadge — colored status pill.
+ *
+ * Replaces all `style="background:${color}1a;color:${color}"` ad-hoc inline styles.
+ *
+ * <StatusBadge name="Zovem" color="#3b82f6" />
+ * <StatusBadge status={row.status} />
+ */
+import type { IconName } from "~/lib/icons";
+
+interface StatusLike {
+  name: string;
+  color: string;
+  isTerminalWon?: boolean;
+  isTerminalLost?: boolean;
+}
+
+interface Props {
+  name: string;
+  color: string;
+  isTerminalWon?: boolean;
+  isTerminalLost?: boolean;
+  size?: "sm" | "md";
+  class?: string;
+}
+
+const {
+  name,
+  color,
+  isTerminalWon = false,
+  isTerminalLost = false,
+  size = "md",
+  class: cls = "",
+} = Astro.props;
+
+const sz = size === "sm" ? "px-1.5 py-0 text-[10px]" : "px-2.5 py-0.5 text-xs";
+const term = isTerminalWon || isTerminalLost;
+---
+<span
+  class={`inline-flex items-center gap-1 rounded-full font-medium ${sz} ${cls}`}
+  style={`background:${color}1a;color:${color};border:1px solid ${color}33`}
+  title={isTerminalWon ? "Završen (uspeh)" : isTerminalLost ? "Završen (neuspeh)" : ""}
+>
+  {isTerminalWon && <span aria-hidden="true">✓</span>}
+  {isTerminalLost && <span aria-hidden="true">✗</span>}
+  {name}
+</span>

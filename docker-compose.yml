@@ -1,0 +1,74 @@
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: outreach-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/data/outreach.db
+      - SCRAPER_URL=http://scraper:8001
+      - SCRAPER_LEADS_URL=http://scraper-leads:8002
+    volumes:
+      - ./data:/data
+    depends_on:
+      - scraper
+      - scraper-leads
+    networks:
+      - outreach
+
+  scraper:
+    build:
+      context: ./scraper
+      dockerfile: Dockerfile
+    container_name: outreach-scraper
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/outreach.db
+      - MAX_PAGES_PER_LEAD=30
+    volumes:
+      - ./data:/data
+    networks:
+      - outreach
+
+  scraper-leads:
+    build:
+      context: ./scraper-leads
+      dockerfile: Dockerfile
+    container_name: outreach-scraper-leads
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - RUNS_DIR=/data/scraper-runs
+      - JOB_TIMEOUT_SEC=900
+    volumes:
+      - ./data:/data
+    networks:
+      - outreach
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: outreach-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - outreach
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  outreach:
+    driver: bridge

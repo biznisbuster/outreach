@@ -1,0 +1,45 @@
+# deps
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.next/
+out/
+build/
+dist/
+
+# scraper-leads — ugrađen kao nested git repo, ne treba nam istorija
+scraper-leads/.git/
+scraper-leads/.agent_output/
+scraper-leads/.pytest_cache/
+scraper-leads/dist/
+scraper-leads/.venv/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# data (runtime SQLite, screenshots, backups)
+data/
+!data/.gitkeep
+
+# VPS: ~/outreach-data/ živi IZVAN repo foldera (vidi deploy/README.md).
+# Ne treba ignore — već nije u repou. Ali setup-vps.sh ga kreira na hostu.
+
+# never allow a stray SQLite DB under web/ — the single source of truth is data/outreach.db
+web/outreach.db
+web/outreach.db-shm
+web/outreach.db-wal
+
+# caddy
+caddy_data/
+caddy_config/
+
+# os / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+*.swp

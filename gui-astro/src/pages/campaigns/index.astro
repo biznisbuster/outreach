@@ -1,0 +1,132 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import Card from "../../components/Card.astro";
+import CardContent from "../../components/CardContent.astro";
+import CardHeader from "../../components/CardHeader.astro";
+import CardTitle from "../../components/CardTitle.astro";
+import CardDescription from "../../components/CardDescription.astro";
+import PageHeader from "../../components/PageHeader.astro";
+import ImportDialog from "../../components/ImportDialog.astro";
+import Icon from "../../components/Icon.astro";
+import { getDb, schema } from "../../lib/db";
+import { eq, desc, count } from "drizzle-orm";
+
+const db = getDb();
+const url = Astro.url;
+const ok = url.searchParams.get("ok");
+const error = url.searchParams.get("error");
+
+const items = db
+  .select({
+    id: schema.campaigns.id,
+    name: schema.campaigns.name,
+    category: schema.campaigns.category,
+    city: schema.campaigns.city,
+    createdAt: schema.campaigns.createdAt,
+    leadCount: count(schema.leads.id),
+  })
+  .from(schema.campaigns)
+  .leftJoin(schema.leads, eq(schema.leads.campaignId, schema.campaigns.id))
+  .groupBy(schema.campaigns.id)
+  .orderBy(desc(schema.campaigns.createdAt))
+  .all();
+
+const totalLeads = items.reduce(function (a, c) { return a + Number(c.leadCount); }, 0);
+---
+<AppLayout title="Kampanje — Outreach">
+  <PageHeader
+    title="Kampanje"
+    subtitle={`${items.length} ${items.length === 1 ? "kampanja" : "kampanja"} · ${totalLeads} ukupno leadova`}
+  >
+    <ImportDialog
+      slot="actions"
+      campaigns={items.map((c) => ({ id: c.id, name: c.name }))}
+    />
+  </PageHeader>
+
+  <div class="space-y-6 px-6 pt-6 pb-10">
+    {ok && (
+      <div class="rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm text-success" role="status">
+        {decodeURIComponent(ok)}
+      </div>
+    )}
+    {error && (
+      <div class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive" role="alert">
+        {decodeURIComponent(error)}
+      </div>
+    )}
+
+    <div class="grid auto-rows-[8.5rem] gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <!-- CREATE-CARD: prva kartica — 2 reda -->
+      <Card variant="flat" class="row-span-2 flex flex-col border-dashed border-2">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2 text-base">
+            <span class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary-soft text-primary">
+              <Icon name="plus" size={14} />
+            </span>
+            Nova kampanja
+          </CardTitle>
+          <CardDescription>
+            Unesi kategoriju i grad — automatski formira naziv.
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-1 flex-col">
+          <form method="POST" action="/api/campaigns/create" class="flex h-full flex-col justify-between gap-3">
+            <div class="space-y-2.5">
+              <input
+                name="category"
+                required
+                placeholder="Kategorija (npr. Cvećara)"
+                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+              />
+              <input
+                name="city"
+                required
+                placeholder="Grad (npr. Kruševac)"
+                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+              />
+            </div>
+            <button
+              type="submit"
+              class="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+            >
+              <Icon name="plus" size={14} />
+              Kreiraj
+            </button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <!-- Existing campaigns -->
+      {items.length === 0 ? (
+        <Card class="sm:col-span-1 lg:col-span-2">
+          <CardContent class="py-12 text-center">
+            <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <Icon name="users" size={22} />
+            </div>
+            <p class="font-medium">Nema kampanja.</p>
+            <p class="mt-1 text-sm text-muted-foreground">Kreiraj prvu iznad ili importuj CSV.</p>
+          </CardContent>
+        </Card>
+      ) : items.map((c) => (
+        <a href={`/campaigns/${c.id}`} class="group block">
+          <Card variant="interactive" class="h-full">
+            <CardHeader>
+              <CardTitle class="text-base">{c.name}</CardTitle>
+              <p class="text-xs text-muted-foreground">
+                {Number(c.leadCount)} {Number(c.leadCount) === 1 ? "lead" : "leadova"}
+                {c.category ? ` · ${c.category}` : ""}
+                {c.city ? ` · ${c.city}` : ""}
+              </p>
+            </CardHeader>
+            <CardContent>
+              <p class="text-xs text-muted-foreground">
+                Kreirano {new Date(c.createdAt).toLocaleDateString("sr-RS")}
+              </p>
+            </CardContent>
+          </Card>
+        </a>
+      ))}
+    </div>
+  </div>
+</AppLayout>

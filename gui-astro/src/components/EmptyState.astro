@@ -1,0 +1,40 @@
+---
+/**
+ * EmptyState — consistent "no data" placeholder.
+ *
+ * <EmptyState
+ *   icon="inbox"
+ *   title="Nema odgovora"
+ *   description="Podesi IMAP u Podešavanja i klikni Poll IMAP sad."
+ *   cta={{ href: '/settings', label: 'Otvori podešavanja' }}
+ * />
+ */
+import Icon from "./Icon.astro";
+import type { IconName } from "~/lib/icons";
+import Button from "./Button.astro";
+
+interface Props {
+  icon?: IconName;
+  title: string;
+  description?: string;
+  cta?: { href: string; label: string; icon?: IconName };
+  class?: string;
+}
+
+const { icon, title, description, cta, class: cls = "" } = Astro.props;
+---
+<div class={`flex flex-col items-center justify-center px-6 py-12 text-center ${cls}`}>
+  {icon && (
+    <div class="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+      <Icon name={icon} size={24} />
+    </div>
+  )}
+  <p class="text-base font-semibold text-foreground">{title}</p>
+  {description && <p class="mt-1 max-w-md text-sm text-muted-foreground">{description}</p>}
+  {cta && (
+    <Button href={cta.href} variant="outline" size="sm" icon={cta.icon} class="mt-4">
+      {cta.label}
+    </Button>
+  )}
+  <slot />
+</div>

@@ -1,0 +1,207 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import Card from "../../components/Card.astro";
+import CardContent from "../../components/CardContent.astro";
+import CardHeader from "../../components/CardHeader.astro";
+import CardTitle from "../../components/CardTitle.astro";
+import CardDescription from "../../components/CardDescription.astro";
+import PageHeader from "../../components/PageHeader.astro";
+import { getDb, schema } from "../../lib/db";
+import { asc, count } from "drizzle-orm";
+import { and, eq, isNull, sql, desc, like, or } from "drizzle-orm";
+import AddLeadDialog from "../../components/AddLeadDialog.astro";
+import LeadIdentity from "../../components/LeadIdentity.astro";
+
+const db = getDb();
+const url = Astro.url;
+const search = url.searchParams.get("search") ?? "";
+const statusId = url.searchParams.get("statusId") ?? "";
+const campaignId = url.searchParams.get("campaignId") ?? "";
+const city = url.searchParams.get("city") ?? "";
+const pageNum = Number(url.searchParams.get("page") ?? "1");
+const pageSize = 50;
+
+const conds: any[] = [];
+if (search) {
+  const s = `%${search}%`;
+  conds.push(sql`(lower(${schema.leads.name}) LIKE lower(${s}) OR lower(coalesce(${schema.leads.email},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.city},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.websiteNormalized},'')) LIKE lower(${s}))`);
+}
+if (statusId === "null") conds.push(isNull(schema.leads.statusId));
+else if (statusId) conds.push(eq(schema.leads.statusId, Number(statusId)));
+if (campaignId) conds.push(eq(schema.leads.campaignId, Number(campaignId)));
+if (city) conds.push(eq(schema.leads.city, city));
+
+const where = conds.length ? and(...conds) : undefined;
+
+const items = db
+  .select({
+    lead: schema.leads,
+    statusName: schema.statuses.name,
+    statusColor: schema.statuses.color,
+    campaignName: schema.campaigns.name,
+    hasScreenshot: sql<number>`CASE WHEN EXISTS (SELECT 1 FROM screenshots s WHERE s.lead_id = ${schema.leads.id}) THEN 1 ELSE 0 END`,
+  })
+  .from(schema.leads)
+  .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
+  .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.leads.campaignId))
+  .where(where)
+  .orderBy(desc(schema.leads.createdAt))
+  .limit(pageSize)
+  .offset((pageNum - 1) * pageSize)
+  .all();
+
+const totalRow = db.select({ c: count() }).from(schema.leads).where(where).all()[0];
+const total = Number(totalRow?.c ?? 0);
+const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+const statuses = db.select().from(schema.statuses).orderBy(asc(schema.statuses.sortOrder)).all();
+const campaigns = db.select({ id: schema.campaigns.id, name: schema.campaigns.name }).from(schema.campaigns).all();
+const cities = db
+  .selectDistinct({ city: schema.leads.city })
+  .from(schema.leads)
+  .orderBy(asc(schema.leads.city))
+  .all()
+  .map((r) => r.city)
+  .filter(Boolean) as string[];
+
+function buildUrl(overrides: Record<string, string | number | null | undefined>) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries({ search, statusId, campaignId, city, page: String(pageNum), ...overrides })) {
+    if (v !== null && v !== undefined && v !== "") params.set(k, String(v));
+  }
+  return `/leads?${params.toString()}`;
+}
+---
+<AppLayout title="Leadovi — Outreach">
+  <div>
+    <PageHeader
+      title="Leadovi"
+      subtitle={`${total} ${total === 1 ? "lead" : "leadova"} · strana ${pageNum}/${totalPages}`}
+    >
+      <AddLeadDialog
+        slot="actions"
+        campaigns={campaigns}
+        autoOpen={url.searchParams.get("action") === "new"}
+      />
+    </PageHeader>
+
+    <div class="space-y-6 p-6">
+      <!-- Filteri -->
+      <Card>
+        <CardContent class="pt-6">
+          <form method="get" class="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              name="search"
+              value={search}
+              placeholder="Pretraga (naziv, email, grad, web)"
+              class="flex h-9 w-72 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <select name="statusId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <option value="">Svi statusi</option>
+              <option value="null" selected={statusId === "null"}>Bez statusa</option>
+              {statuses.map((s) => (
+                <option value={String(s.id)} selected={statusId === String(s.id)}>{s.name}</option>
+              ))}
+            </select>
+            <select name="campaignId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <option value="">Sve kampanje</option>
+              {campaigns.map((c) => (
+                <option value={String(c.id)} selected={campaignId === String(c.id)}>{c.name}</option>
+              ))}
+            </select>
+            <select name="city" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+              <option value="">Svi gradovi</option>
+              {cities.map((c) => (
+                <option value={c} selected={city === c}>{c}</option>
+              ))}
+            </select>
+            <button type="submit" class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Filtriraj</button>
+            {(search || statusId || campaignId || city) && (
+              <a href="/leads" class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Reset</a>
+            )}
+          </form>
+        </CardContent>
+      </Card>
+
+      <!-- Tabela -->
+      <Card>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th class="px-4 py-2">Naziv</th>
+                <th class="px-4 py-2">Status</th>
+                <th class="px-4 py-2">Kampanja</th>
+                <th class="px-4 py-2">Grad</th>
+                <th class="px-4 py-2">Email</th>
+                <th class="px-4 py-2">Telefon</th>
+                <th class="px-4 py-2">Web</th>
+                <th class="px-4 py-2" title="Screenshot">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y">
+              {items.length === 0 ? (
+                <tr><td colspan="8" class="px-4 py-12 text-center text-muted-foreground">Nema leadova za zadane filtere.</td></tr>
+              ) : items.map((r) => (
+                <tr class="hover:bg-accent">
+                  <td class="px-4 py-2">
+                    <div class="flex items-start gap-2">
+                      <div class="min-w-0 flex-1">
+                        <LeadIdentity
+                          lead={{ id: r.lead.id, name: r.lead.name, category: r.lead.category, city: r.lead.city }}
+                          href={`/leads/${r.lead.id}`}
+                          variant="default"
+                        />
+                        {(r.lead.address) && (
+                          <div class="mt-0.5 truncate text-xs text-muted-foreground">{r.lead.address}</div>
+                        )}
+                      </div>
+                      {r.lead.doNotContact && (
+                        <span class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">DNC</span>
+                      )}
+                    </div>
+                  </td>
+                  <td class="px-4 py-2">
+                    {r.statusName ? (
+                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs" style={`background:${r.statusColor}1a;color:${r.statusColor}`}>{r.statusName}</span>
+                    ) : <span class="text-muted-foreground">—</span>}
+                  </td>
+                  <td class="px-4 py-2 text-muted-foreground">{r.campaignName ?? "—"}</td>
+                  <td class="px-4 py-2 text-muted-foreground">{r.lead.city ?? "—"}</td>
+                  <td class="px-4 py-2">
+                    {r.lead.email ? (
+                      <a href={`mailto:${r.lead.email}`} class="text-primary hover:underline">{r.lead.email}</a>
+                    ) : "—"}
+                  </td>
+                  <td class="px-4 py-2">
+                    {r.lead.phoneE164 ? (
+                      <a href={`tel:${r.lead.phoneE164}`} class="text-primary hover:underline">{r.lead.phoneE164}</a>
+                    ) : "—"}
+                  </td>
+                  <td class="px-4 py-2">
+                    {r.lead.websiteNormalized ? (
+                      <a href={`https://${r.lead.websiteNormalized}`} target="_blank" rel="noopener" class="text-primary hover:underline">{r.lead.websiteNormalized}</a>
+                    ) : "—"}
+                  </td>
+                  <td class="px-4 py-2 text-center">{r.hasScreenshot ? <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="inline text-emerald-600"><polyline points="20 6 9 17 4 12"/></svg> : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <!-- Paginacija -->
+      {totalPages > 1 && (
+        <div class="flex items-center justify-center gap-2">
+          {pageNum > 1 && <a href={buildUrl({ page: pageNum - 1 })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">← Prethodna</a>}
+          <span class="text-sm text-muted-foreground">Strana {pageNum} od {totalPages}</span>
+          {pageNum < totalPages && <a href={buildUrl({ page: pageNum + 1 })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Sledeća →</a>}
+        </div>
+      )}
+    </div>
+  </div>
+</AppLayout>

@@ -1,0 +1,278 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import CardDescription from "../components/CardDescription.astro";
+import KpiCard from "../components/KpiCard.astro";
+import { getDb, schema } from "../lib/db";
+import { count, eq, gte, and, sql } from "drizzle-orm";
+import { formatNumber, timeAgo } from "../lib/utils";
+import { getCallTodo } from "../lib/dashboard";
+
+const db = getDb();
+
+function sinceDays(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+const totalLeads = Number(db.select({ c: count() }).from(schema.leads).all()[0]?.c ?? 0);
+const totalCampaigns = Number(db.select({ c: count() }).from(schema.campaigns).all()[0]?.c ?? 0);
+
+const sent7d = Number(
+  db
+    .select({ c: count() })
+    .from(schema.emailSends)
+    .where(and(eq(schema.emailSends.status, "sent"), gte(schema.emailSends.sentAt, sinceDays(7))))
+    .all()[0]?.c ?? 0,
+);
+const sent30d = Number(
+  db
+    .select({ c: count() })
+    .from(schema.emailSends)
+    .where(and(eq(schema.emailSends.status, "sent"), gte(schema.emailSends.sentAt, sinceDays(30))))
+    .all()[0]?.c ?? 0,
+);
+const replied30d = Number(
+  db
+    .select({ c: count() })
+    .from(schema.emailSends)
+    .where(
+      and(
+        eq(schema.emailSends.status, "sent"),
+        gte(schema.emailSends.sentAt, sinceDays(30)),
+        eq(schema.emailSends.replied, true),
+      ),
+    )
+    .all()[0]?.c ?? 0,
+);
+const replyRate = sent30d > 0 ? Math.round((replied30d / sent30d) * 100) : 0;
+
+const queuedCount = Number(
+  db.select({ c: count() }).from(schema.emailSends).where(eq(schema.emailSends.status, "queued")).all()[0]?.c ?? 0,
+);
+const draftsCount = Number(
+  db.select({ c: count() }).from(schema.emailSends).where(eq(schema.emailSends.status, "draft")).all()[0]?.c ?? 0,
+);
+const leadsWithoutWebsite = Number(
+  db
+    .select({ c: count() })
+    .from(schema.leads)
+    .where(sql`${schema.leads.websiteNormalized} IS NULL`)
+    .all()[0]?.c ?? 0,
+);
+
+const statusRows = db
+  .select({ name: schema.statuses.name, color: schema.statuses.color, n: count() })
+  .from(schema.leads)
+  .innerJoin(schema.statuses, eq(schema.leads.statusId, schema.statuses.id))
+  .groupBy(schema.statuses.id)
+  .orderBy(sql`count() desc`)
+  .limit(5)
+  .all();
+const leadsWithStatus = statusRows.reduce((a: number, s) => a + Number(s.n), 0);
+
+const todoItems = await getCallTodo(20);
+
+const kpis = [
+  {
+    label: "Leadovi",
+    value: formatNumber(totalLeads),
+    hint: `${formatNumber(totalCampaigns)} ${totalCampaigns === 1 ? "kampanja" : "kampanja"}`,
+    icon: "users" as const,
+    tone: "primary" as const,
+    href: "/leads",
+  },
+  {
+    label: "Poslato (7d)",
+    value: formatNumber(sent7d),
+    hint: `${formatNumber(replied30d)} odgovora (30d)`,
+    icon: "send" as const,
+    tone: "info" as const,
+    href: "/queue?status=sent",
+  },
+  {
+    label: "Reply rate",
+    value: sent30d > 0 ? `${replyRate}%` : "—",
+    hint: "poslednjih 30 dana",
+    icon: "trending-up" as const,
+    tone: "success" as const,
+  },
+  {
+    label: "U redu",
+    value: formatNumber(queuedCount),
+    hint: `${formatNumber(draftsCount)} ${draftsCount === 1 ? "draft" : "draftova"}`,
+    icon: "inbox" as const,
+    tone: "warning" as const,
+    href: "/queue?status=open",
+  },
+];
+---
+<AppLayout title="Dashboard — Outreach">
+  <div>
+    <div class="border-b px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Dashboard</h1>
+      <p class="text-sm text-muted-foreground">Pregled aktivnosti i to-do za danas</p>
+    </div>
+
+    <div class="space-y-6 px-6 pt-6 pb-10">
+      <!-- KPI -->
+      <div class="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {kpis.map((k) => <KpiCard {...k} />)}
+      </div>
+
+      <!-- Za zvanje danas -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <div>
+              <CardTitle class="flex items-center gap-2 text-base">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                Za zvanje danas
+              </CardTitle>
+              <CardDescription>Follow-up koji kasni + aktivni leadovi bez kontakta 5+ dana</CardDescription>
+            </div>
+            <span class="text-sm font-medium text-muted-foreground">{todoItems.length} {todoItems.length === 1 ? "lead" : "leadova"}</span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {todoItems.length === 0 ? (
+            <div class="flex flex-col items-center justify-center py-10 text-center text-sm text-muted-foreground">
+              <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              <p class="font-medium">Nema hitnih poziva.</p>
+              <p>Svi aktivni leadovi su kontaktirani u poslednjih 5 dana.</p>
+            </div>
+          ) : (
+            <div class="max-h-[20vh] divide-y overflow-y-auto">
+              {todoItems.map((it) => (
+                <a href={`/leads/${it.leadId}`} class="flex items-center gap-3 px-1 py-3 hover:bg-accent">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 text-sm font-medium">
+                      {it.name}
+                      <span
+                        class="inline-flex items-center rounded-full px-2 py-0.5 text-xs"
+                        style={`background:${it.statusColor}1a;color:${it.statusColor}`}
+                      >
+                        {it.statusName}
+                      </span>
+                    </div>
+                    <div class="text-xs text-muted-foreground">
+                      {it.reason === "followup_due" ? "Follow-up" : "Bez kontakta"} · {it.daysOverdue}d
+                      {it.city ? ` · ${it.city}` : ""}
+                    </div>
+                  </div>
+                  {it.phoneE164 && (
+                    <a
+                      href={`tel:${it.phoneE164}`}
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-md text-primary hover:bg-accent"
+                      onclick="event.stopPropagation()"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    </a>
+                  )}
+                </a>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div class="grid gap-4 lg:grid-cols-3">
+        <Card class="lg:col-span-2">
+          <CardHeader>
+            <CardTitle class="text-base">Leadovi po statusu</CardTitle>
+            <CardDescription>{leadsWithStatus > 0 ? `${leadsWithStatus} leadova sa statusom` : "Nema leadova sa statusom"}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {statusRows.length === 0 ? (
+              <div class="flex flex-col items-center justify-center py-8 text-center">
+                <div class="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                </div>
+                <p class="font-medium">Nema leadova</p>
+                <p class="mb-3 text-sm text-muted-foreground">Dodaj leadove da počneš — ručno ili kroz import.</p>
+                <a href="/leads?action=new" class="text-sm font-medium text-primary hover:underline">Dodaj prvog klijenta</a>
+              </div>
+            ) : (
+              <div class="space-y-3">
+                {statusRows.map((s) => {
+                  const pct = leadsWithStatus > 0 ? Math.round((Number(s.n) / leadsWithStatus) * 100) : 0;
+                  return (
+                    <div>
+                      <div class="mb-1 flex items-center justify-between text-sm">
+                        <div class="flex items-center gap-2">
+                          <span class="h-2.5 w-2.5 rounded-full" style={`background:${s.color}`} />
+                          <span class="font-medium">{s.name}</span>
+                        </div>
+                        <span class="text-muted-foreground">{formatNumber(s.n)} · {pct}%</span>
+                      </div>
+                      <div class="h-2 overflow-hidden rounded-full bg-muted">
+                        <div class="h-full rounded-full" style={`width:${pct}%;background:${s.color}`} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2 text-base">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+              Alerti
+            </CardTitle>
+            <CardDescription>Stvari koje treba obraditi</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-3 text-sm">
+            {draftsCount > 0 && (
+              <a href="/queue" class="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2 transition-colors hover:bg-amber-100">
+                <span class="text-amber-900">Draftova čeka na pregled</span>
+                <span class="font-semibold text-amber-900">{draftsCount}</span>
+              </a>
+            )}
+            {leadsWithoutWebsite > 0 && (
+              <a href="/campaigns" class="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2 transition-colors hover:bg-amber-100">
+                <span class="text-amber-900">Leadova bez website-a</span>
+                <span class="font-semibold text-amber-900">{leadsWithoutWebsite}</span>
+              </a>
+            )}
+            {queuedCount > 0 && (
+              <a href="/queue" class="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2 transition-colors hover:bg-amber-100">
+                <span class="text-amber-900">Emailova u redu slanja</span>
+                <span class="font-semibold text-amber-900">{queuedCount}</span>
+              </a>
+            )}
+            {draftsCount === 0 && leadsWithoutWebsite === 0 && queuedCount === 0 && (
+              <p class="py-4 text-center text-muted-foreground">Sve čisto. Nema hitnih obaveza.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base">Brze akcije</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <a href="/campaigns" class="flex items-center gap-2 rounded-md border p-3 text-sm font-medium transition-colors hover:bg-accent">
+              <span class="text-primary">↑</span> Uvezi CSV
+            </a>
+            <a href="/leads?action=new" class="flex items-center gap-2 rounded-md border p-3 text-sm font-medium transition-colors hover:bg-accent">
+              <span class="text-primary">+</span> Dodaj ručno
+            </a>
+            <a href="/campaigns" class="flex items-center gap-2 rounded-md border p-3 text-sm font-medium transition-colors hover:bg-accent">
+              <span class="text-primary">👥</span> Otvori kampanje
+            </a>
+            <a href="/templates" class="flex items-center gap-2 rounded-md border p-3 text-sm font-medium transition-colors hover:bg-accent">
+              <span class="text-primary">📄</span> Uredi šablone
+            </a>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</AppLayout>

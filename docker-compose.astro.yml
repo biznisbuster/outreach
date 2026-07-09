@@ -1,0 +1,88 @@
+# Astro GUI replacement stack — radi paralelno sa Next.js ili ga zamenjuje.
+# Dželi isti /data/outreach.db (relativno od ovog fajla: ../data).
+#
+# Pokretanje:
+#   docker compose -f docker-compose.astro.yml up -d --build
+# Web sluša na portu 3001 (Next je na 3000). Caddy vidi oba i bira gui-astro
+# ako je Caddyfile prebačen na ovaj fajl.
+#
+# Za kompletnu zamenu Next-a: zaustavi web servis u glavnom compose-u,
+# izmeni Caddyfile reverse_proxy sa `web:3000` na `gui-astro:3000`,
+# ili jednostavno izađi iz Next docker-compose i koristi samo ovaj.
+
+services:
+  gui-astro:
+    build:
+      context: ./gui-astro
+      dockerfile: Dockerfile
+    container_name: outreach-gui-astro
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/data/outreach.db
+      - SCRAPER_URL=http://scraper:8001
+      - SCRAPER_LEADS_URL=http://scraper-leads:8002
+      - PORT=3000
+    volumes:
+      - ./data:/data
+    depends_on:
+      - scraper
+      - scraper-leads
+    networks:
+      - outreach
+
+  scraper:
+    build:
+      context: ./scraper
+      dockerfile: Dockerfile
+    container_name: outreach-scraper
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/data/outreach.db
+      - MAX_PAGES_PER_LEAD=30
+    volumes:
+      - ./data:/data
+    networks:
+      - outreach
+
+  scraper-leads:
+    build:
+      context: ./scraper-leads
+      dockerfile: Dockerfile
+    container_name: outreach-scraper-leads
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - RUNS_DIR=/data/scraper-runs
+      - JOB_TIMEOUT_SEC=900
+    volumes:
+      - ./data:/data
+    networks:
+      - outreach
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: outreach-caddy-astro
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gui-astro
+    networks:
+      - outreach
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  outreach:
+    driver: bridge
+    name: outreach

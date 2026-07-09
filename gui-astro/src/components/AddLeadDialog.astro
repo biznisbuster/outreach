@@ -1,0 +1,212 @@
+---
+/**
+ * AddLeadDialog — modal form for creating a single lead.
+ *
+ * Mounts a <dialog> with the full lead form. Trigger button (with id="add-lead-trigger")
+ * opens it; Escape and Cancel close it; backdrop click closes it.
+ *
+ * <AddLeadDialog campaigns={campaigns} autoOpen={url.searchParams.get("action") === "new"} />
+ *
+ * Form posts to /api/leads/create with the same field set the old /leads/new used,
+ * preserving validation, dedup, audit and default-status behavior.
+ *
+ * Slot:
+ *   - trigger: optional custom trigger (replaces default button). Must include id="add-lead-trigger" on the element.
+ */
+import Icon from "./Icon.astro";
+import Button from "./Button.astro";
+
+interface CampaignLite {
+  id: number;
+  name: string;
+}
+
+interface Props {
+  campaigns: CampaignLite[];
+  autoOpen?: boolean;
+  class?: string;
+}
+
+const { campaigns, autoOpen = false, class: cls = "" } = Astro.props;
+---
+<!-- Default trigger if no custom one is provided via the slot -->
+{Astro.slots.has("trigger") ? (
+  <slot name="trigger" />
+) : (
+  <Button id="add-lead-trigger" variant="primary" icon="plus">
+    Dodaj klijenta
+  </Button>
+)}
+
+<dialog id="add-lead-dialog" class={`modal-dialog rounded-xl border border-border bg-card p-0 shadow-2xl backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}>
+  <div class="flex max-h-[85vh] w-[min(720px,calc(100vw-2rem))] flex-col">
+    <!-- Header -->
+    <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+      <div>
+        <h2 class="text-lg font-bold tracking-tight">Dodaj klijenta</h2>
+        <p class="mt-0.5 text-sm text-muted-foreground">Ručni unos jednog lead-a u bazu</p>
+      </div>
+      <button
+        type="button"
+        data-close-dialog
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label="Zatvori"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Body -->
+    <form
+      id="add-lead-form"
+      method="POST"
+      action="/api/leads/create"
+      class="flex-1 overflow-y-auto px-5 py-4"
+    >
+      <div class="grid grid-cols-2 gap-3">
+        <!-- Naziv — full width -->
+        <div class="col-span-2 space-y-1.5">
+          <label for="add-lead-name" class="block text-sm font-medium">
+            Naziv <span class="text-destructive" aria-hidden="true">*</span>
+          </label>
+          <input id="add-lead-name" name="name" required class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <!-- Kampanja — full width -->
+        <div class="col-span-2 space-y-1.5">
+          <label for="add-lead-campaign" class="block text-sm font-medium">
+            Kampanja <span class="text-destructive" aria-hidden="true">*</span>
+          </label>
+          <select id="add-lead-campaign" name="campaignId" required class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary">
+            <option value="">Odaberi kampanju</option>
+            {campaigns.map((c) => (
+              <option value={String(c.id)}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="add-lead-category" class="block text-sm font-medium">Kategorija</label>
+          <input id="add-lead-category" name="category" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="add-lead-city" class="block text-sm font-medium">
+            Grad <span class="text-destructive" aria-hidden="true">*</span>
+          </label>
+          <input id="add-lead-city" name="city" required class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="add-lead-phone" class="block text-sm font-medium">Telefon</label>
+          <input id="add-lead-phone" name="phoneRaw" placeholder="064/123-4567" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="add-lead-email" class="block text-sm font-medium">Email</label>
+          <input id="add-lead-email" name="email" type="email" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="col-span-2 space-y-1.5">
+          <label for="add-lead-website" class="block text-sm font-medium">Website</label>
+          <input id="add-lead-website" name="websiteRaw" placeholder="example.rs" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="col-span-2 space-y-1.5">
+          <label for="add-lead-address" class="block text-sm font-medium">Adresa</label>
+          <input id="add-lead-address" name="address" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="space-y-1.5">
+          <label for="add-lead-postal" class="block text-sm font-medium">Poštanski broj</label>
+          <input id="add-lead-postal" name="postalCode" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label for="add-lead-rating" class="block text-sm font-medium">Google ocena</label>
+            <input id="add-lead-rating" name="googleRating" type="number" step="0.1" min="1" max="5" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+          </div>
+          <div class="space-y-1.5">
+            <label for="add-lead-reviews" class="block text-sm font-medium">Recenzije</label>
+            <input id="add-lead-reviews" name="reviewsCount" type="number" min="0" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+          </div>
+        </div>
+
+        <div class="col-span-2 space-y-1.5">
+          <label for="add-lead-source" class="block text-sm font-medium">Izvor</label>
+          <input id="add-lead-source" name="source" placeholder="npr. manual, poznanstvo…" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" />
+        </div>
+      </div>
+
+      <div class="mt-4 hidden rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive" data-form-errors></div>
+    </form>
+
+    <!-- Footer -->
+    <footer class="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+      <Button variant="ghost" type="button" data-close-dialog>Otkaži</Button>
+      <Button variant="primary" type="submit" form="add-lead-form" icon="check">Sačuvaj</Button>
+    </footer>
+  </div>
+</dialog>
+
+<style is:global>
+  /* Center modal in viewport + responsive width */
+  .modal-dialog {
+    margin: auto;
+    max-width: min(720px, calc(100vw - 2rem));
+    max-height: 90vh;
+  }
+  .modal-dialog::backdrop {
+    background-color: rgb(0 0 0 / 0.5);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+</style>
+
+<script is:inline define:vars={{ autoOpen }}>
+  (function () {
+    var dlg = document.getElementById("add-lead-dialog");
+    var trig = document.getElementById("add-lead-trigger");
+    if (!dlg) return;
+
+    function open() {
+      if (typeof dlg.showModal !== "function") {
+        // Fallback if browser doesn't support <dialog>
+        window.location.href = "/leads?action=new";
+        return;
+      }
+      try { dlg.showModal(); } catch (e) { console.error(e); }
+      setTimeout(function () {
+        var firstInput = dlg.querySelector("input, select, textarea");
+        if (firstInput) firstInput.focus();
+      }, 50);
+    }
+    function close() {
+      if (dlg.open) dlg.close();
+    }
+
+    if (trig) {
+      trig.addEventListener("click", function (e) {
+        e.preventDefault();
+        open();
+      });
+    }
+    // All [data-close-dialog] buttons (X, Cancel)
+    dlg.querySelectorAll("[data-close-dialog]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        close();
+      });
+    });
+    // Backdrop click closes
+    dlg.addEventListener("click", function (e) {
+      if (e.target === dlg) close();
+    });
+
+    // Auto-open if requested (e.g. /leads?action=new)
+    if (autoOpen) setTimeout(open, 100);
+  })();
+</script>

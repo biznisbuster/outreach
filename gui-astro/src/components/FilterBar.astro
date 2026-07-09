@@ -1,0 +1,45 @@
+---
+/**
+ * FilterBar — GET-method filter form. Wraps inputs + submit.
+ *
+ * <FilterBar>
+ *   <input type="search" name="search" placeholder="..." class="..." />
+ *   <select name="statusId" class="...">...</select>
+ *   <a slot="reset" href="/leads">Reset</a>
+ * </FilterBar>
+ *
+ * Use Tailwind utility classes on the input/select directly — this component
+ * only wraps the layout. Body classes:
+ *   - inputs: h-9 rounded-md border border-input bg-background px-3 text-sm …
+ */
+import Button from "./Button.astro";
+
+interface Props {
+  method?: "GET" | "POST";
+  action?: string;
+  hasReset?: boolean;
+  resetHref?: string;
+  submitLabel?: string;
+  class?: string;
+}
+const {
+  method = "GET",
+  action = "",
+  submitLabel = "Filtriraj",
+  class: cls = "",
+} = Astro.props;
+---
+<form
+  method={method}
+  action={action}
+  class={`flex flex-wrap items-center gap-2 ${cls}`}
+  data-filter-bar
+>
+  <div class="flex flex-1 flex-wrap items-center gap-2">
+    <slot />
+  </div>
+  {Astro.slots.has("reset") && (
+    <slot name="reset" />
+  )}
+  <Button type="submit" variant="primary">{submitLabel}</Button>
+</form>

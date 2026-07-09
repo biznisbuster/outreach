@@ -1,0 +1,43 @@
+---
+/**
+ * Textarea — multi-line input atom.
+ */
+interface Props {
+  name: string;
+  id?: string;
+  value?: string;
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+  readonly?: boolean;
+  rows?: number;
+  maxlength?: number;
+  class?: string;
+  monospace?: boolean;
+}
+
+const {
+  name,
+  id,
+  value,
+  placeholder,
+  required,
+  disabled,
+  readonly,
+  rows = 4,
+  maxlength,
+  class: cls = "",
+  monospace = false,
+} = Astro.props;
+---
+<textarea
+  name={name}
+  id={id}
+  required={required}
+  disabled={disabled}
+  readonly={readonly}
+  rows={rows}
+  maxlength={maxlength}
+  placeholder={placeholder}
+  class={`flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary disabled:cursor-not-allowed disabled:opacity-50 ${monospace ? "font-mono text-xs" : ""} ${cls}`}
+>{value ?? ""}</textarea>

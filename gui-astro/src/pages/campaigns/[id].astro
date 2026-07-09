@@ -1,0 +1,695 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import Card from "../../components/Card.astro";
+import CardHeader from "../../components/CardHeader.astro";
+import CardTitle from "../../components/CardTitle.astro";
+import CardDescription from "../../components/CardDescription.astro";
+import CardContent from "../../components/CardContent.astro";
+import ScrapePanel from "../../components/ScrapePanel.astro";
+import LeadIdentity from "../../components/LeadIdentity.astro";
+import StatusBadge from "../../components/StatusBadge.astro";
+import { getDb, schema } from "../../lib/db";
+import { eq, desc, count, asc } from "drizzle-orm";
+import { formatDate, formatNumber, relativeTime, formatPhone, getInitials } from "../../lib/utils";
+
+const id = Number(Astro.params.id);
+const db = getDb();
+const [campaign] = db.select().from(schema.campaigns).where(eq(schema.campaigns.id, id)).all();
+if (!campaign) return new Response(null, { status: 404 });
+
+// lead stats + recent
+const leadStats = db
+  .select({ n: count(), statusId: schema.leads.statusId })
+  .from(schema.leads)
+  .where(eq(schema.leads.campaignId, id))
+  .groupBy(schema.leads.statusId)
+  .all();
+const leadTotal = leadStats.reduce((a, x) => a + Number(x.n), 0);
+const statusList = db.select().from(schema.statuses).orderBy(asc(schema.statuses.sortOrder)).all();
+const statusMap = new Map(statusList.map((s) => [s.id, s]));
+
+// Detaljni upit: sve korisne kolone u jednom prolazu
+const recentLeads = db
+  .select({
+    lead: schema.leads,
+    statusName: schema.statuses.name,
+    statusColor: schema.statuses.color,
+    isTerminalWon: schema.statuses.isTerminalWon,
+    isTerminalLost: schema.statuses.isTerminalLost,
+  })
+  .from(schema.leads)
+  .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
+  .where(eq(schema.leads.campaignId, id))
+  .orderBy(desc(schema.leads.createdAt))
+  .limit(50)
+  .all();
+
+// Source badge boje/kratkih oznaka
+const SOURCE_META: Record<string, { label: string; cls: string }> = {
+  maps: { label: "Maps", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  google_maps: { label: "Maps", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  csv: { label: "CSV", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  json: { label: "JSON", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  manual: { label: "Ručno", cls: "bg-slate-50 text-slate-700 border-slate-200" },
+  import: { label: "Import", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  enrichment: { label: "Enrich", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+};
+
+function sourceBadge(src: string | null) {
+  const key = (src || "").toLowerCase();
+  return SOURCE_META[key] || { label: src || "—", cls: "bg-slate-50 text-slate-700 border-slate-200" };
+}
+
+// Rating → vizuelni hint (boja zvezde + mala progress bar)
+function ratingHint(rating: number | null) {
+  if (rating == null) return { color: "text-slate-300", bg: "bg-slate-200", pct: 0 };
+  if (rating >= 4.5) return { color: "text-emerald-500", bg: "bg-emerald-500", pct: (rating / 5) * 100 };
+  if (rating >= 4.0) return { color: "text-lime-500", bg: "bg-lime-500", pct: (rating / 5) * 100 };
+  if (rating >= 3.0) return { color: "text-amber-500", bg: "bg-amber-500", pct: (rating / 5) * 100 };
+  return { color: "text-red-500", bg: "bg-red-500", pct: (rating / 5) * 100 };
+}
+---
+<AppLayout title={`${campaign.name} — Kampanje`}>
+  <div>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4">
+      <div>
+        <a href="/campaigns" class="text-xs text-muted-foreground hover:underline">← Kampanje</a>
+        <h1 class="text-xl font-bold tracking-tight text-slate-900">{campaign.name}</h1>
+        <p class="text-sm text-muted-foreground">
+          {leadTotal} leadova · kreirano {formatDate(campaign.createdAt)}
+          {campaign.category ? ` · ${campaign.category}` : ""}
+          {campaign.city ? ` · ${campaign.city}` : ""}
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <a
+          href={`/leads?campaignId=${id}`}
+          class="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Otvori sve ({leadTotal})
+        </a>
+        <a
+          href={`/api/leads/export.csv?campaignId=${id}`}
+          class="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+        >
+          Export CSV
+        </a>
+      </div>
+    </div>
+
+    <div class="space-y-6 p-6">
+      <!-- 1) SCRAPE — primarno -->
+      <Card>
+        <CardHeader>
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle class="text-base">Google Maps scrape</CardTitle>
+              <CardDescription>
+                Pretražuje Maps za kategoriju + grad, izvlači kontakt podatke (telefon, website, adresa, rating, reviews) i uvozi ih u ovu kampanju.
+              </CardDescription>
+            </div>
+            <a
+              href={`/leads?action=new`}
+              class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+              title="Dodaj ručno jednog lead-a (modal)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              Dodaj leada
+            </a>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ScrapePanel
+            defaultQuery={campaign.category && campaign.city ? `${campaign.category} ${campaign.city}` : ""}
+            buttonLabel={campaign.category && campaign.city ? `Pokreni scrape — ${campaign.category} · ${campaign.city}` : "Pokreni scrape"}
+          />
+        </CardContent>
+      </Card>
+
+      <!-- 2) Statistika — slim inline row -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
+        <span class="font-medium text-muted-foreground">Statusi:</span>
+        {leadStats.length === 0 ? (
+          <span class="text-muted-foreground">Nema leadova.</span>
+        ) : (
+          <>
+            {leadStats.map((row) => {
+              const s = row.statusId !== null ? statusMap.get(row.statusId) : null;
+              const n = Number(row.n);
+              const pct = leadTotal > 0 ? Math.round((n / leadTotal) * 100) : 0;
+              const color = s?.color ?? "#94a3b8";
+              const filterValue = row.statusId != null ? String(row.statusId) : "__none__";
+              return (
+                <button
+                  type="button"
+                  data-filter-status={filterValue}
+                  title={`Filtriraj po ${s?.name ?? "Bez statusa"} · ${pct}%`}
+                  aria-label={`Filtriraj po ${s?.name ?? "Bez statusa"}`}
+                  class="stat-filter-chip inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                >
+                  <span class="h-2 w-2 rounded-full" style={`background:${color}`} aria-hidden="true"></span>
+                  <span class="font-medium text-foreground">{s?.name ?? "Bez statusa"}</span>
+                  <span class="tabular-nums text-muted-foreground">{formatNumber(n)}</span>
+                  <span class="chip-active-indicator hidden text-primary" aria-hidden="true">✓</span>
+                </button>
+              );
+            })}
+            <span class="ml-auto inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums">
+              <span class="text-muted-foreground">Ukupno</span>
+              <span>{formatNumber(leadTotal)}</span>
+            </span>
+          </>
+        )}
+      </div>
+
+      <!-- 3) Leads sa filterima i sortiranjem -->
+      <Card>
+        <CardHeader>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle class="text-base">Poslednjih {recentLeads.length} leadova</CardTitle>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                Prikazano {recentLeads.length} od ukupno {formatNumber(leadTotal)} leadova
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative">
+                <input
+                  type="search"
+                  id="lead-search"
+                  placeholder="Pretraga (naziv, grad, email, kategorija)"
+                  class="h-9 w-64 rounded-md border border-border bg-background pl-9 pr-3 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+                />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+              </div>
+              <select id="lead-status-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Status filter">
+                <option value="">Svi statusi</option>
+                {statusList.map((s) => (
+                  <option value={String(s.id)}>{s.name}</option>
+                ))}
+                <option value="__none__">Bez statusa</option>
+              </select>
+              <select id="lead-source-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Izvor filter">
+                <option value="">Svi izvori</option>
+                {Array.from(new Set(recentLeads.map((l) => (l.source || "").toLowerCase()).filter(Boolean))).sort().map((src) => (
+                  <option value={src}>{src}</option>
+                ))}
+              </select>
+              <select id="lead-city-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Grad filter">
+                <option value="">Svi gradovi</option>
+                {Array.from(new Set(recentLeads.map((l) => (l.city || "").trim()).filter(Boolean))).sort().map((c) => (
+                  <option value={c.toLowerCase()}>{c}</option>
+                ))}
+              </select>
+              <select id="lead-rating-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Google ocena filter">
+                <option value="">Bilo koja ocena</option>
+                <option value="4.5">★★★★★ ≥ 4.5</option>
+                <option value="4.0">★★★★ ≥ 4.0</option>
+                <option value="3.0">★★★ ≥ 3.0</option>
+                <option value="-1">Bez ocene</option>
+              </select>
+              <select id="lead-contact-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Kontakt filter">
+                <option value="">Bilo koji kontakt</option>
+                <option value="email">Sa email-om</option>
+                <option value="phone">Sa telefonom</option>
+                <option value="both">Sa oba</option>
+                <option value="none">Bez kontakta</option>
+              </select>
+              <select id="lead-website-filter" class="h-9 rounded-md border border-input bg-background px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary" aria-label="Website filter">
+                <option value="">Bilo koji web</option>
+                <option value="yes">Ima web</option>
+                <option value="no">Bez web-a</option>
+              </select>
+              <button
+                type="button"
+                id="lead-filters-reset"
+                class="hidden h-9 items-center rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-accent"
+              >
+                Reset filtera
+              </button>
+              <a href={`/leads?campaignId=${id}`} class="text-xs text-primary hover:underline">Vidi sve →</a>
+              <span id="lead-count-shown" class="ml-1 text-xs tabular-nums text-muted-foreground"></span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent class="p-0">
+          {recentLeads.length === 0 ? (
+            <div class="px-6 py-12 text-center">
+              <p class="text-muted-foreground">Nema leadova u ovoj kampanji.</p>
+              <a href={`/leads?action=new`} class="mt-2 inline-block text-sm text-primary hover:underline">Dodaj prvog →</a>
+            </div>
+          ) : (
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur text-left text-xs uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th class="px-4 py-2.5 font-medium" data-sort="name"><span class="th-label">Naziv</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="contact"><span class="th-label">Kontakt</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="website"><span class="th-label">Website</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="rating"><span class="th-label">Google</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="status"><span class="th-label">Status</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="source"><span class="th-label">Izvor</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5 font-medium" data-sort="created"><span class="th-label">Dodat</span><span class="sort-ind" aria-hidden="true"></span></th>
+                    <th class="px-4 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100" id="leads-tbody">
+                  {recentLeads.map((r) => {
+                    const l = r.lead;
+                    const src = sourceBadge(l.source);
+                    const hint = ratingHint(l.googleRating);
+                    const phone = l.phoneE164 || l.phoneRaw;
+                    const website = l.websiteNormalized || l.websiteRaw;
+                    return (
+                      <tr
+                        class="group hover:bg-slate-50"
+                        data-name={(l.name || "").toLowerCase()}
+                        data-category={(l.category || "").toLowerCase()}
+                        data-city={(l.city || "").toLowerCase()}
+                        data-email={(l.email || "").toLowerCase()}
+                        data-phone={l.phoneE164 || l.phoneRaw || ""}
+                        data-website={(l.websiteNormalized || l.websiteRaw || "").toLowerCase()}
+                        data-source={(l.source || "").toLowerCase()}
+                        data-status={l.statusId != null ? String(l.statusId) : "__none__"}
+                        data-status-order={
+                          l.statusId != null
+                            ? (statusMap.get(l.statusId)?.sortOrder ?? 9999)
+                            : 9999
+                        }
+                        data-rating={l.googleRating ?? ""}
+                        data-reviews-count={l.reviewsCount ?? ""}
+                        data-created={l.createdAt ? new Date(l.createdAt).getTime() : 0}
+                        data-has-phone={l.phoneE164 || l.phoneRaw ? "1" : "0"}
+                        data-has-email={l.email ? "1" : "0"}
+                        data-has-website={l.websiteNormalized || l.websiteRaw ? "1" : "0"}
+                      >
+                        <td class="px-4 py-2.5 align-top">
+                          <div class="flex items-start gap-2.5">
+                            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                              {getInitials(l.name)}
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              <LeadIdentity
+                                lead={{ id: l.id, name: l.name, category: l.category, city: l.city }}
+                                href={`/leads/${l.id}`}
+                                variant="default"
+                              />
+                              {(l.address) && (
+                                <div class="mt-0.5 truncate text-xs text-muted-foreground" title={l.address}>
+                                  {l.address}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          {phone ? (
+                            <a
+                              href={`tel:${phone}`}
+                              class="block text-sm font-mono text-slate-700 hover:text-primary"
+                              title={phone}
+                            >
+                              {formatPhone(phone)}
+                            </a>
+                          ) : (
+                            <span class="text-slate-300">—</span>
+                          )}
+                          {l.email ? (
+                            <a
+                              href={`mailto:${l.email}`}
+                              class="mt-0.5 block truncate text-xs text-slate-500 hover:text-primary"
+                              title={l.email}
+                            >
+                              {l.email}
+                            </a>
+                          ) : (
+                            !phone && <span class="text-xs text-slate-300">bez kontakta</span>
+                          )}
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          {website ? (
+                            <a
+                              href={website.startsWith("http") ? website : `https://${website}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              class="inline-flex max-w-[180px] items-center gap-1 truncate text-sm text-slate-700 hover:text-primary"
+                              title={website}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0 text-slate-400">
+                                <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                              </svg>
+                              <span class="truncate">{website.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]}</span>
+                            </a>
+                          ) : (
+                            <span class="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          {l.googleRating != null ? (
+                            <div class="flex items-center gap-2">
+                              <div class="flex items-center gap-0.5">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class={hint.color}>
+                                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                                </svg>
+                                <span class="text-sm font-semibold text-slate-900">{l.googleRating.toFixed(1)}</span>
+                              </div>
+                              {l.reviewsCount != null && (
+                                <span class="text-xs text-slate-500" title={`${l.reviewsCount} recenzija`}>
+                                  ({formatNumber(l.reviewsCount)})
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span class="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          {r.statusName ? (
+                            <StatusBadge
+                              name={r.statusName}
+                              color={r.statusColor}
+                              isTerminalWon={r.isTerminalWon}
+                              isTerminalLost={r.isTerminalLost}
+                            />
+                          ) : (
+                            <span class="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                              bez statusa
+                            </span>
+                          )}
+                          {l.doNotContact && (
+                            <div class="mt-1">
+                              <span
+                                class="inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+                                title="Do not contact — blokiran"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                  <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+                                </svg>
+                                DNT
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          <span class={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${src.cls}`}>
+                            {src.label}
+                          </span>
+                        </td>
+                        <td class="px-4 py-2.5 align-top">
+                          <span class="text-xs text-slate-600" title={l.createdAt ? formatDate(l.createdAt) : ""}>
+                            {relativeTime(l.createdAt)}
+                          </span>
+                        </td>
+                        <td class="px-4 py-2.5 align-top text-right">
+                          <a
+                            href={`/leads/${l.id}`}
+                            class="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100"
+                            title="Otvori detalje"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <path d="m9 18 6-6-6-6"/>
+                            </svg>
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {recentLeads.length > 0 && (
+                <p id="no-matches" class="hidden px-6 py-8 text-center text-sm text-slate-500">
+                  Nema leadova koji odgovaraju pretrazi.
+                </p>
+              )}
+
+              <style is:global>
+                /* Sort indicator styling on table headers */
+                th[data-sort] { user-select: none; }
+                th[data-sort] { transition: color 150ms cubic-bezier(0.16, 1, 0.3, 1); }
+                th[data-sort] .sort-ind {
+                  display: inline-flex;
+                  align-items: center;
+                  margin-left: 4px;
+                  color: hsl(var(--primary));
+                  opacity: 0;
+                  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1);
+                }
+                th[data-sort]:hover { color: hsl(var(--foreground)); }
+                th[data-sort]:hover .sort-ind { opacity: 0.4; }
+                th[data-sort] .sort-ind:not(:empty) { opacity: 1; }
+              </style>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+
+  <script is:inline>
+    (function () {
+      var search = document.getElementById("lead-search");
+      var statusFilter = document.getElementById("lead-status-filter");
+      var tbody = document.getElementById("leads-tbody");
+      var noMatches = document.getElementById("no-matches");
+      if (!tbody) return;
+
+      // === Filter wiring ===
+      var sourceFilter = document.getElementById("lead-source-filter");
+      var cityFilter = document.getElementById("lead-city-filter");
+      var ratingFilter = document.getElementById("lead-rating-filter");
+      var contactFilter = document.getElementById("lead-contact-filter");
+      var websiteFilter = document.getElementById("lead-website-filter");
+      var resetBtn = document.getElementById("lead-filters-reset");
+      var countShownEl = document.getElementById("lead-count-shown");
+
+      function isAnyFilterActive() {
+        return !!(search && search.value) ||
+          !!(statusFilter && statusFilter.value) ||
+          !!(sourceFilter && sourceFilter.value) ||
+          !!(cityFilter && cityFilter.value) ||
+          !!(ratingFilter && ratingFilter.value) ||
+          !!(contactFilter && contactFilter.value) ||
+          !!(websiteFilter && websiteFilter.value);
+      }
+
+      function applyFilters() {
+        var q = (search && search.value || "").trim().toLowerCase();
+        var st = statusFilter && statusFilter.value || "";
+        var src = sourceFilter && sourceFilter.value || "";
+        var cty = cityFilter && cityFilter.value || "";
+        var rat = ratingFilter && ratingFilter.value || "";
+        var cont = contactFilter && contactFilter.value || "";
+        var web = websiteFilter && websiteFilter.value || "";
+
+        var ratMin = rat === "" ? null : parseFloat(rat);
+        var ratIsNoRating = rat === "-1";
+
+        var shown = 0;
+        var total = 0;
+        var rows = tbody.querySelectorAll("tr");
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          total++;
+          var name = row.getAttribute("data-name") || "";
+          var category = row.getAttribute("data-category") || "";
+          var city = row.getAttribute("data-city") || "";
+          var email = row.getAttribute("data-email") || "";
+          var matchSearch = !q ||
+            name.indexOf(q) >= 0 ||
+            category.indexOf(q) >= 0 ||
+            city.indexOf(q) >= 0 ||
+            email.indexOf(q) >= 0;
+
+          var rowStatus = row.getAttribute("data-status") || "";
+          var matchStatus = !st || rowStatus === st;
+
+          var rowSource = row.getAttribute("data-source") || "";
+          var matchSource = !src || rowSource === src;
+
+          var matchCity = !cty || city === cty;
+
+          var rowRating = parseFloat(row.getAttribute("data-rating") || "-1");
+          var matchRating = true;
+          if (ratIsNoRating) {
+            matchRating = rowRating < 0;
+          } else if (ratMin != null && !isNaN(ratMin)) {
+            matchRating = rowRating >= ratMin;
+          }
+
+          var hp = row.getAttribute("data-has-phone") === "1";
+          var he = row.getAttribute("data-has-email") === "1";
+          var matchContact = !cont ||
+            (cont === "phone" && hp) ||
+            (cont === "email" && he) ||
+            (cont === "both"  && hp && he) ||
+            (cont === "none"  && !hp && !he);
+
+          var hw = row.getAttribute("data-has-website") === "1";
+          var matchWebsite = !web ||
+            (web === "yes" && hw) ||
+            (web === "no"  && !hw);
+
+          if (matchSearch && matchStatus && matchSource && matchCity && matchRating && matchContact && matchWebsite) {
+            row.style.display = "";
+            shown++;
+          } else {
+            row.style.display = "none";
+          }
+        }
+        if (noMatches) {
+          noMatches.classList.toggle("hidden", shown > 0);
+        }
+        if (countShownEl) {
+          countShownEl.textContent = isAnyFilterActive()
+            ? (shown + " / " + total + " prikazano")
+            : "";
+        }
+        if (resetBtn) {
+          resetBtn.classList.toggle("hidden", !isAnyFilterActive());
+        }
+      }
+
+      function resetFilters() {
+        if (search) search.value = "";
+        if (statusFilter) statusFilter.value = "";
+        if (sourceFilter) sourceFilter.value = "";
+        if (cityFilter) cityFilter.value = "";
+        if (ratingFilter) ratingFilter.value = "";
+        if (contactFilter) contactFilter.value = "";
+        if (websiteFilter) websiteFilter.value = "";
+        applyFilters();
+      }
+
+      [search, statusFilter, sourceFilter, cityFilter, ratingFilter, contactFilter, websiteFilter]
+        .filter(Boolean)
+        .forEach(function (el) { el.addEventListener("input", applyFilters); el.addEventListener("change", applyFilters); });
+      if (resetBtn) resetBtn.addEventListener("click", resetFilters);
+
+      // Status-strip chips: clicking a pill in the "Statusi" row sets the
+      // status filter <select> to that value and re-applies filters.
+      // Clicking the same chip again unselects (toggles off).
+      var statusChips = document.querySelectorAll("[data-filter-status]");
+      statusChips.forEach(function (chip) {
+        chip.addEventListener("click", function () {
+          if (!statusFilter) return;
+          var want = chip.getAttribute("data-filter-status") || "";
+          var current = statusFilter.value || "";
+          statusFilter.value = (current === want) ? "" : want;
+          statusFilter.dispatchEvent(new Event("change", { bubbles: true }));
+          // Update active indicator
+          statusChips.forEach(function (c) {
+            var ind = c.querySelector(".chip-active-indicator");
+            if (ind) ind.classList.toggle("hidden", statusFilter.value !== c.getAttribute("data-filter-status"));
+          });
+          // Scroll the table into view so the filter result is visible
+          var tableCard = tbody ? tbody.closest(".overflow-hidden, .rounded-lg, .border") : null;
+          if (tableCard) tableCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      });
+      // Keep chip indicators in sync if filter changes via the <select>
+      var syncChipIndicators = function () {
+        statusChips.forEach(function (c) {
+          var ind = c.querySelector(".chip-active-indicator");
+          if (ind) ind.classList.toggle("hidden", statusFilter.value !== c.getAttribute("data-filter-status"));
+        });
+      };
+      if (statusFilter) statusFilter.addEventListener("change", syncChipIndicators);
+
+      // === Sort wiring (every header with data-sort) ===
+      var sortState = { col: null, dir: 1 };
+
+      // Pull a sort key out of a snapshot row (plain object produced by the
+      // map() in applySort). Keys are camelCase stripped of the `data-` prefix:
+      //   data-name → name, data-rating → rating, data-status-order → statusOrder, …
+      function getSortValue(row, col) {
+        var v;
+        if (col === "name")      v = row.name || "";
+        else if (col === "category") v = row.category || "";
+        else if (col === "city")     v = row.city || "";
+        else if (col === "contact")  v = ((row.phone || "") + " " + (row.email || "")).trim();
+        else if (col === "website")  v = row.website || "";
+        else if (col === "rating")   v = parseFloat(row.rating != null && row.rating !== "" ? row.rating : "-1");
+        else if (col === "reviews")  v = parseFloat(row.reviews != null && row.reviews !== "" ? row.reviews : "-1");
+        else if (col === "created")  v = parseInt(row.created || "0", 10);
+        else if (col === "status")   v = parseInt(row.statusOrder || "9999", 10);
+        else if (col === "source")   v = row.source || "";
+        else v = "";
+        return v;
+      }
+
+      function compareValues(a, b, col) {
+        var va = getSortValue(a, col);
+        var vb = getSortValue(b, col);
+        // Missing values always sort to the bottom regardless of direction
+        var numCols = { rating: true, reviews: true, created: true, status: true };
+        var aMissing = (va === "" || (numCols[col] && (isNaN(va) || va < 0 && col !== "created")));
+        var bMissing = (vb === "" || (numCols[col] && (isNaN(vb) || vb < 0 && col !== "created")));
+        if (aMissing && bMissing) return 0;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        if (typeof va === "number" && typeof vb === "number") {
+          return va - vb;
+        }
+        var sa = String(va).toLowerCase();
+        var sb = String(vb).toLowerCase();
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return 0;
+      }
+      var SORT_GLYPH_UP = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>';
+      var SORT_GLYPH_DOWN = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+      function updateSortIndicators() {
+        document.querySelectorAll("th[data-sort]").forEach(function (th) {
+          var ind = th.querySelector(".sort-ind");
+          if (!ind) return;
+          var active = th.getAttribute("data-sort") === sortState.col;
+          if (!active) { ind.innerHTML = ""; th.classList.remove("text-foreground"); th.classList.add("text-slate-500"); return; }
+          ind.innerHTML = sortState.dir === 1 ? SORT_GLYPH_UP : SORT_GLYPH_DOWN;
+          th.classList.add("text-foreground");
+          th.classList.remove("text-slate-500");
+        });
+      }
+      function applySort(col) {
+        if (sortState.col === col) sortState.dir = -sortState.dir;
+        else { sortState.col = col; sortState.dir = -1; }
+        // Snapshot values then sort (camelCase keys strip the `data-` prefix)
+        var rowsData = Array.from(tbody.querySelectorAll("tr")).map(function (tr) {
+          return {
+            name: tr.getAttribute("data-name") || "",
+            category: tr.getAttribute("data-category") || "",
+            city: tr.getAttribute("data-city") || "",
+            phone: tr.getAttribute("data-phone") || "",
+            email: tr.getAttribute("data-email") || "",
+            website: tr.getAttribute("data-website") || "",
+            source: tr.getAttribute("data-source") || "",
+            status: tr.getAttribute("data-status") || "",
+            statusOrder: tr.getAttribute("data-status-order") || "9999",
+            rating: tr.getAttribute("data-rating") || "",
+            reviews: tr.getAttribute("data-reviews-count") || "",
+            created: tr.getAttribute("data-created") || "0",
+            el: tr,
+          };
+        });
+        rowsData.sort(function (a, b) {
+          var c = compareValues(a, b, col);
+          return c * sortState.dir;
+        });
+        rowsData.forEach(function (r) { tbody.appendChild(r.el); });
+        updateSortIndicators();
+      }
+      var headers = document.querySelectorAll("th[data-sort]");
+      headers.forEach(function (th) {
+        th.style.cursor = "pointer";
+        th.classList.add("select-none");
+        th.addEventListener("click", function () { applySort(th.getAttribute("data-sort")); });
+      });
+      // Initial indicator render
+      updateSortIndicators();
+
+      // Run once to set initial visible count
+      applyFilters();
+    })();
+  </script>
+</AppLayout>

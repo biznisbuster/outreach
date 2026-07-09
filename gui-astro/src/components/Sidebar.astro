@@ -1,0 +1,234 @@
+---
+/**
+ * Sidebar — sectioned, collapsible sidebar.
+ *
+ * Sections:
+ *   - Now:        Dashboard
+ *   - Outreach:   Kampanje, Leadovi, Dodaj, Import, Queue, Inbox
+ *   - Setup:      Senderi, Šabloni, Statusi, Podešavanja
+ *   - Insights:   Audit
+ *
+ * Collapse state is in localStorage; SSR renders expanded state then JS shrinks.
+ */
+import { cn } from "~/lib/utils";
+import Icon from "./Icon.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+
+const pathname = Astro.url.pathname;
+
+type Item = { href: string; label: string; icon: string; shortcut?: string };
+type Section = { title: string; items: Item[] };
+
+const sections: Section[] = [
+  {
+    title: "Sad",
+    items: [
+      { href: "/", label: "Dashboard", icon: "layout-dashboard", shortcut: "G D" },
+    ],
+  },
+  {
+    title: "Outreach",
+    items: [
+      { href: "/campaigns", label: "Kampanje", icon: "users", shortcut: "G K" },
+      { href: "/leads", label: "Leadovi", icon: "kanban" },
+      { href: "/queue", label: "Red slanja", icon: "list-checks" },
+      { href: "/inbox", label: "Inbox", icon: "inbox" },
+    ],
+  },
+  {
+    title: "Podešavanje",
+    items: [
+      { href: "/senders", label: "Senderi", icon: "send" },
+      { href: "/templates", label: "Šabloni", icon: "file-text" },
+      { href: "/statuses", label: "Statusi", icon: "tag" },
+      { href: "/settings", label: "Podešavanja", icon: "settings" },
+    ],
+  },
+  {
+    title: "Uvidi",
+    items: [
+      { href: "/audit", label: "Audit log", icon: "activity" },
+    ],
+  },
+];
+
+function isActive(href: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(href + "/");
+}
+---
+<aside
+  id="app-sidebar"
+  class="group/sidebar relative flex h-screen shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200 ease-out"
+  data-collapsed="false"
+>
+  <!-- Header -->
+  <div class="flex h-14 items-center justify-between gap-1 border-b border-border px-4" data-sidebar-header>
+    <a href="/" class="flex min-w-0 items-center gap-2.5">
+      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-sm shadow-primary/30">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+        </svg>
+      </span>
+      <span class="sidebar-label truncate text-lg font-bold tracking-tight">Outreach</span>
+    </a>
+    <!-- Collapse toggle: UVEK vidljiv (čak i kad je collapsed).
+         Kad je otvoren, labela "Outreach" zauzima prostor — dugme ide desno.
+         Kad je collapsed, labele su sakrivene, dugme ostaje centrirano. -->
+    <button
+      id="sidebar-collapse"
+      type="button"
+      class="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      aria-label="Skrati sidebar"
+      title="Skrati sidebar"
+      data-collapse-toggle
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m9 18 6-6-6-6"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Nav -->
+  <nav class="flex-1 overflow-y-auto px-3 py-3">
+    {sections.map((sec) => (
+      <div class="mb-4">
+        <div class="sidebar-label mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{sec.title}</div>
+        <ul class="space-y-0.5">
+          {sec.items.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <li>
+                <a
+                  href={item.href}
+                  data-active={active ? "true" : "false"}
+                  class={cn(
+                    "group/link relative flex h-9 items-center gap-3 rounded-md px-2.5 text-sm font-medium transition-colors press",
+                    active
+                      ? "bg-primary-soft text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  )}
+                  title={item.label}
+                  aria-label={item.label}
+                >
+                  <span class={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center transition-colors",
+                    active ? "text-primary" : "text-muted-foreground group-hover/link:text-foreground",
+                  )}>
+                    <Icon name={item.icon as any} size={16} />
+                  </span>
+                  <span class="sidebar-label flex-1 truncate">{item.label}</span>
+                  {item.shortcut && (
+                    <span class="sidebar-label inline-flex shrink-0 items-center gap-0.5 text-[10px] font-normal text-muted-foreground">
+                      {item.shortcut}
+                    </span>
+                  )}
+                  {active && (
+                    <span class="absolute inset-y-1.5 left-0 w-0.5 rounded-r-full bg-primary sidebar-label-hidden" aria-hidden="true"></span>
+                  )}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    ))}
+  </nav>
+
+  <!-- Footer -->
+  <div class="border-t border-border p-2.5 space-y-2">
+    <!-- Theme toggle: uvek full width (expanded). Kad je collapsed, label nestaje ali ikona ostaje centrirana. -->
+    <ThemeToggle expanded />
+    <button
+      id="open-cmd-k"
+      type="button"
+      class="sidebar-label flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      aria-label="Otvori brzu navigaciju"
+    >
+      <span class="flex h-6 w-6 shrink-0 items-center justify-center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>
+        </svg>
+      </span>
+      <span class="sidebar-label flex-1 truncate text-left">Brza pretraga</span>
+      <kbd class="sidebar-label rounded border border-border bg-muted px-1 py-0 text-[10px] font-normal text-muted-foreground">⌘K</kbd>
+    </button>
+    <form action="/api/auth/logout" method="POST">
+      <button
+        type="submit"
+        class="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        title="Odjavi se"
+      >
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>
+          </svg>
+        </span>
+        <span class="sidebar-label flex-1 truncate text-left">Odjavi se</span>
+      </button>
+    </form>
+  </div>
+</aside>
+
+<style is:global>
+  /* Sidebar width + collapsed label hidden */
+  #app-sidebar { width: 240px; }
+  #app-sidebar[data-collapsed="true"] { width: 64px; }
+  #app-sidebar[data-collapsed="true"] .sidebar-label,
+  #app-sidebar[data-collapsed="true"] .sidebar-label-hidden { display: none; }
+  #app-sidebar[data-collapsed="true"] #sidebar-collapse svg { transform: rotate(180deg); }
+  /* Smoothen icon centering when collapsed */
+  #app-sidebar[data-collapsed="true"] .group\/link,
+  /* Theme toggle expanded mode: centrira ikonu kad label nestane */
+  #app-sidebar[data-collapsed="true"] #theme-toggle { justify-content: center; padding-left: 0; padding-right: 0; }
+  /* Header: kad je collapsed, centriraj collapse dugme (labela "Outreach" je sakrivena) */
+  #app-sidebar[data-collapsed="true"] [data-sidebar-header] { justify-content: center; padding-left: 0; padding-right: 0; }
+  /* Footer: kad je collapsed, centriraj sve full-width buttone */
+  #app-sidebar[data-collapsed="true"] #open-cmd-k,
+  #app-sidebar[data-collapsed="true"] form button[type="submit"] { justify-content: center; padding-left: 0; padding-right: 0; }
+</style>
+
+<script is:inline>
+  (function () {
+    var sidebar = document.getElementById("app-sidebar");
+    var collapseBtn = document.getElementById("sidebar-collapse");
+    var cmdBtn = document.getElementById("open-cmd-k");
+
+    function syncCollapseAria() {
+      if (!collapseBtn || !sidebar) return;
+      var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
+      collapseBtn.setAttribute("aria-label", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
+      collapseBtn.setAttribute("title", isCollapsed ? "Proširi sidebar" : "Skrati sidebar");
+    }
+
+    function setCollapsed(collapsed) {
+      if (!sidebar) return;
+      sidebar.setAttribute("data-collapsed", collapsed ? "true" : "false");
+      try { localStorage.setItem("app_sidebar_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+      syncCollapseAria();
+    }
+
+    // Restore sidebar collapsed state from localStorage
+    try {
+      var stored = localStorage.getItem("app_sidebar_collapsed");
+      if (stored === "1") setCollapsed(true);
+      else syncCollapseAria();
+    } catch (e) {}
+
+    // Toggle sidebar collapse
+    if (collapseBtn) {
+      collapseBtn.addEventListener("click", function () {
+        if (!sidebar) return;
+        var isCollapsed = sidebar.getAttribute("data-collapsed") === "true";
+        setCollapsed(!isCollapsed);
+      });
+    }
+
+    // Open command palette (theme toggle has its own inline script inside <ThemeToggle />)
+    if (cmdBtn) {
+      cmdBtn.addEventListener("click", function () {
+        if (typeof window.__openCommandPalette === "function") window.__openCommandPalette();
+      });
+    }
+  })();
+</script>

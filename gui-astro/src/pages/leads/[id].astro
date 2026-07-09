@@ -1,0 +1,831 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import Card from "../../components/Card.astro";
+import CardContent from "../../components/CardContent.astro";
+import CardHeader from "../../components/CardHeader.astro";
+import CardTitle from "../../components/CardTitle.astro";
+import CardDescription from "../../components/CardDescription.astro";
+import EditableField from "../../components/EditableField.astro";
+import { getDb, schema } from "../../lib/db";
+import { eq, desc } from "drizzle-orm";
+import { formatDate, timeAgo } from "../../lib/utils";
+
+const id = Number(Astro.params.id);
+const db = getDb();
+const url = Astro.url;
+
+const [row] = db
+  .select({
+    lead: schema.leads,
+    statusName: schema.statuses.name,
+    statusColor: schema.statuses.color,
+    campaignName: schema.campaigns.name,
+  })
+  .from(schema.leads)
+  .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
+  .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.leads.campaignId))
+  .where(eq(schema.leads.id, id))
+  .all();
+
+if (!row) return new Response(null, { status: 404 });
+
+const comments = db
+  .select()
+  .from(schema.comments)
+  .where(eq(schema.comments.leadId, id))
+  .orderBy(desc(schema.comments.createdAt))
+  .all();
+const scrapes = db.select().from(schema.siteScrapes).where(eq(schema.siteScrapes.leadId, id)).all();
+const screenshots = db.select().from(schema.screenshots).where(eq(schema.screenshots.leadId, id)).all();
+const emailSends = db
+  .select()
+  .from(schema.emailSends)
+  .where(eq(schema.emailSends.leadId, id))
+  .orderBy(desc(schema.emailSends.queuedAt))
+  .all();
+const statuses = db.select().from(schema.statuses).orderBy(schema.statuses.sortOrder).all();
+const blocked = db.select().from(schema.blocklist).where(eq(schema.blocklist.leadId, id)).all().length > 0;
+const lead = row.lead;
+
+// Google search URL
+const searchQ = [lead.name, lead.city].filter(Boolean).join(" ");
+const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQ)}`;
+
+const ok = url.searchParams.get("ok");
+const error = url.searchParams.get("error");
+---
+<AppLayout title={`${lead.name} — Outreach`}>
+  <div>
+    <!-- Header -->
+    <div class="border-b border-slate-200 bg-white px-6 py-4">
+      <div class="flex items-center justify-between gap-3">
+        <a href="/leads" class="text-xs text-muted-foreground hover:underline">← Leadovi</a>
+        <div class="flex items-center gap-2">
+          {blocked && (
+            <span class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">Blokiran</span>
+          )}
+        </div>
+      </div>
+      <div class="mt-1 flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h1 class="text-2xl font-bold tracking-tight text-foreground">
+            <a
+              href={googleSearchUrl}
+              target="_blank"
+              rel="noopener"
+              class="hover:text-primary hover:underline"
+              title={`Google pretraga za "${searchQ}"`}
+            >
+              {lead.name}
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-1 inline -translate-y-0.5 text-muted-foreground hover:text-primary"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            </a>
+          </h1>
+          {(lead.category || lead.city) && (
+            <span class="mt-1 inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-foreground/80">
+              {lead.category && <span class="text-foreground/90">{lead.category}</span>}
+              {lead.category && lead.city && <span class="text-muted-foreground">—</span>}
+              {lead.city && <span class="text-foreground/90">{lead.city}</span>}
+            </span>
+          )}
+          <p class="mt-1.5 text-sm text-muted-foreground">
+            {row.campaignName ? (
+              <a href={`/campaigns/${lead.campaignId}`} class="hover:underline">{row.campaignName}</a>
+            ) : "Bez kampanje"}
+            {lead.address ? ` · ${lead.address}` : ""}
+          </p>
+        </div>
+        <!-- Status select (desno, automatski čuva) -->
+        <div class="flex shrink-0 items-center gap-2">
+          <label for="header-status-select" class="text-xs font-medium text-muted-foreground">Status:</label>
+          <select
+            id="header-status-select"
+            data-initial-status={lead.statusId != null ? String(lead.statusId) : ""}
+            class="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+            style={lead.statusName ? `color:${row.statusColor}` : undefined}
+          >
+            <option value="__add__" class="text-foreground/80">+ Dodaj novi status</option>
+            {statuses.map((s) => (
+              <option value={String(s.id)} selected={s.id === lead.statusId} style={`color:${s.color}`}>{s.name}</option>
+            ))}
+            <option value="__none__" selected={lead.statusId === null}>Bez statusa</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-6 p-6">
+      {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
+      {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <div class="grid gap-6 lg:grid-cols-3">
+        <!-- LEFT column: Kontakt → Email → Screenshots -->
+        <div class="lg:col-span-2 space-y-6">
+          <!-- 1) KONTAKT — editable inputs, autosave on blur -->
+          <Card>
+            <CardHeader>
+              <div class="flex items-center justify-between">
+                <div>
+                  <CardTitle class="text-base">Kontakt</CardTitle>
+                  <CardDescription>Sva polja se automatski čuvaju kad klikneš van</CardDescription>
+                </div>
+                <span
+                  id="contact-save-indicator"
+                  data-state="idle"
+                  class="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
+                  aria-live="polite"
+                >
+                  <span data-indicator-icon></span>
+                  <span data-indicator-text>Idle</span>
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div class="grid grid-cols-1 gap-x-3 gap-y-3 md:grid-cols-2">
+                <EditableField name="name" label="Naziv" value={lead.name} required />
+                <EditableField name="category" label="Kategorija" value={lead.category} />
+                <EditableField name="city" label="Grad" value={lead.city} required />
+                <EditableField name="address" label="Adresa" value={lead.address} />
+                <EditableField name="postalCode" label="Poštanski broj" value={lead.postalCode} />
+                <EditableField name="phoneRaw" label="Telefon" value={lead.phoneRaw} type="tel" placeholder="064/123-4567" />
+                <EditableField name="email" label="Email" value={lead.email} type="email" />
+                <EditableField name="websiteRaw" label="Website" value={lead.websiteRaw} type="url" placeholder="example.rs" />
+                <EditableField name="googleRating" label="Google ocena (1–5)" value={lead.googleRating} type="number" step="0.1" min="1" max="5" />
+                <EditableField name="reviewsCount" label="Broj recenzija" value={lead.reviewsCount} type="number" min="0" />
+                <EditableField name="source" label="Izvor" value={lead.source} placeholder="npr. manual, poznanstvo…" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 3) EMAIL historia */}
+          {emailSends.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div class="flex items-center justify-between">
+                  <CardTitle class="text-base">Email istorija ({emailSends.length})</CardTitle>
+                  <details class="relative">
+                    <summary class="cursor-pointer text-xs text-primary hover:underline">+ Novi email (ručno)</summary>
+                    <form method="POST" action={`/leads/${id}/new-email`} class="absolute right-0 top-5 z-10 w-96 space-y-2 rounded-md border border-border bg-card p-3 shadow-lg">
+                      <input name="subject" required placeholder="Subject" class="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm" />
+                      <textarea name="body" required rows="5" placeholder="Telo emaila…" class="flex w-full rounded-md border border-input bg-background px-2 py-1 text-xs"></textarea>
+                      <button type="submit" class="inline-flex h-8 w-full items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">Sačuvaj draft</button>
+                    </form>
+                  </details>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div class="divide-y divide-border">
+                  {emailSends.map((e) => (
+                    <div class="py-3">
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                          <div class="font-medium text-sm">{e.subject || "(bez subject-a)"}</div>
+                          <div class="text-xs text-muted-foreground">
+                            {e.status} · {e.replied && "✓ reply"} · {e.generatedByAi ? "AI" : "ručno"}
+                          </div>
+                        </div>
+                        <div class="text-xs text-muted-foreground">{formatDate(e.queuedAt ?? e.sentAt ?? null)}</div>
+                      </div>
+                      {e.body && (
+                        <details class="mt-2">
+                          <summary class="cursor-pointer text-xs text-primary">Prikaži telo</summary>
+                          <pre class="mt-2 whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs">{e.body}</pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 4) SCREENSHOTS */}
+          {screenshots.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle class="text-base">Screenshots ({screenshots.length})</CardTitle>
+                <CardDescription>Klikni sliku za fullscreen</CardDescription>
+              </CardHeader>
+              <CardContent class="space-y-2">
+                {screenshots.map((s) => (
+                  <button
+                    type="button"
+                    class="screenshot-thumb group block w-full overflow-hidden rounded-md border border-border bg-muted/40 transition hover:border-primary"
+                    data-src={`/api/screenshot/${lead.id}?v=${s.id}`}
+                    data-caption={`${lead.name} — ${formatDate(s.capturedAt)}`}
+                  >
+                    <img src={`/api/screenshot/${lead.id}?v=${s.id}`} alt="screenshot" loading="lazy" class="block w-full transition group-hover:opacity-90" />
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <!-- RIGHT column: Akcije → Komentari → Detalji -->
+        <div class="space-y-6">
+          {/* Akcije */}
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">Akcije</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-2">
+              {!blocked ? (
+                <form method="POST" action={`/leads/${id}/block`}>
+                  <button type="submit" class="inline-flex h-9 w-full items-center justify-center rounded-md bg-destructive px-3 text-sm font-medium text-destructive-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]">
+                    Blokiraj (do_not_contact)
+                  </button>
+                </form>
+              ) : (
+                <form method="POST" action={`/leads/${id}/unblock`}>
+                  <button type="submit" class="inline-flex h-9 w-full items-center justify-center rounded-md border border-success/30 bg-success-soft px-3 text-sm font-medium text-success hover:bg-success/10">
+                    Odblokiraj
+                  </button>
+                </form>
+              )}
+
+              {lead.websiteNormalized && (
+                <a
+                  href={`https://${lead.websiteNormalized}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                  Idi na sajt
+                </a>
+              )}
+              {lead.websiteNormalized && (
+                <button
+                  type="button"
+                  id="start-site-scrape"
+                  data-lead-id={id}
+                  data-website={lead.websiteNormalized}
+                  class="inline-flex h-9 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  🔄 Pokreni scrape sajta
+                </button>
+              )}
+
+              {/* Live progress za scrape sajta */}
+              <div id="site-scrape-progress" class="hidden rounded-md border border-border bg-muted/40 p-3 text-xs">
+                <div class="mb-2 flex items-center justify-between">
+                  <span class="font-medium" id="ssp-stage">Pokrećem…</span>
+                  <span class="text-muted-foreground" id="ssp-count">0 / 0</span>
+                </div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div id="ssp-bar" class="h-full rounded-full bg-primary transition-all" style="width: 0%"></div>
+                </div>
+                <div class="mt-1.5 truncate text-muted-foreground" id="ssp-msg"></div>
+              </div>
+
+              <a
+                href={googleSearchUrl}
+                target="_blank"
+                rel="noopener"
+                class="inline-flex h-9 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+              >
+                🔍 Google pretraga
+              </a>
+
+              <a
+                href={`https://www.google.com/maps/search/${encodeURIComponent(searchQ)}`}
+                target="_blank"
+                rel="noopener"
+                class="inline-flex h-9 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+              >
+                📍 Google Maps
+              </a>
+
+              <details class="mt-2">
+                <summary class="cursor-pointer rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-center text-xs font-medium text-foreground hover:bg-warning/10">
+                  ⚠ Opasne akcije
+                </summary>
+                <form
+                  method="POST"
+                  action={`/leads/${id}/delete`}
+                  onsubmit="return confirm('TRAJNO obrisati ovog leada i sve njegove komentare, screenshot-ove, emailove?') || event.preventDefault()"
+                  class="mt-2"
+                >
+                  <button type="submit" class="inline-flex h-9 w-full items-center justify-center rounded-md border border-destructive/30 bg-destructive-soft px-3 text-sm font-medium text-destructive hover:bg-destructive/10">
+                    Obriši lead
+                  </button>
+                </form>
+              </details>
+            </CardContent>
+          </Card>
+
+          {/* Komentari */}
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">Komentari ({comments.length})</CardTitle>
+              <CardDescription>Interne beleške — ne idu u email</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form method="POST" action={`/leads/${id}/comment`} class="mb-4 space-y-2">
+                <textarea
+                  name="body"
+                  required
+                  rows="3"
+                  placeholder="Npr. 'Razgovarali smo u sredu, zainteresovan za uslugu, treba poslati ponudu'"
+                  class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+                ></textarea>
+                <div class="flex justify-end">
+                  <button
+                    type="submit"
+                    class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+                  >
+                    + Dodaj komentar
+                  </button>
+                </div>
+              </form>
+
+              {comments.length === 0 ? (
+                <p class="py-3 text-center text-sm text-muted-foreground">Nema komentara. Dodaj prvi iznad.</p>
+              ) : (
+                <ul class="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+                  {comments.map((c) => (
+                    <li class="rounded-md bg-muted/40 p-3 text-sm">
+                      <div class="whitespace-pre-wrap">{c.body}</div>
+                      <div class="mt-1 text-xs text-muted-foreground">{timeAgo(c.createdAt)} · {formatDate(c.createdAt)}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Detalji (uključuje scrape runove ako ih ima) */}
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">Detalji</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-1 text-xs text-muted-foreground">
+              <div>ID: {lead.id}</div>
+              <div>Kreiran: {formatDate(lead.createdAt)}</div>
+              <div>Ažuriran: {formatDate(lead.updatedAt)}</div>
+              {lead.sourceUrl && (
+                <div>
+                  <a href={lead.sourceUrl} target="_blank" class="text-primary hover:underline">Izvor ↗</a>
+                </div>
+              )}
+              {scrapes.length > 0 && (
+                <div class="pt-2">
+                  <div class="font-medium text-foreground">Scrape runovi</div>
+                  {scrapes.map((s) => (
+                    <div class="mt-1 rounded-md bg-muted/40 p-2">
+                      <div class="font-medium">{s.status}</div>
+                      <div class="text-xs">{s.pagesScraped}/{s.totalPagesDiscovered} strana · {formatDate(s.startedAt)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  </div>
+</AppLayout>
+
+<!-- Lightbox modal za screenshot fullscreen -->
+<div
+  id="screenshot-lightbox"
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 p-4"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Screenshot u punoj veličini"
+>
+  <button
+    type="button"
+    id="lb-close"
+    class="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-2xl text-white hover:bg-white/20"
+    aria-label="Zatvori"
+  >
+    ×
+  </button>
+  <button
+    type="button"
+    id="lb-open-new"
+    class="absolute right-16 top-4 z-10 inline-flex h-9 items-center gap-1.5 rounded-md bg-white/10 px-3 text-xs font-medium text-white hover:bg-white/20"
+    title="Otvori u novom tabu"
+  >
+    ⛶ Otvori original
+  </button>
+  <img
+    id="lb-img"
+    src=""
+    alt="Screenshot"
+    class="max-h-[90vh] max-w-[90vw] rounded shadow-2xl"
+  />
+  <div id="lb-caption" class="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs text-white"></div>
+</div>
+
+<!-- Modal: Kreiraj novi status (iz header status-selecta) -->
+<dialog
+  id="status-create-modal"
+  class="modal-dialog overflow-visible border-0 bg-transparent p-0 backdrop:bg-black/50 backdrop:backdrop-blur-sm"
+  style="--modal-max-w: 480px"
+>
+  <div class="rounded-xl border border-border bg-card p-5 shadow-2xl">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold tracking-tight">Novi status</h2>
+      <button
+        type="button"
+        data-status-close
+        class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label="Zatvori"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div data-status-form class="space-y-3">
+      <div>
+        <label class="mb-1.5 block text-sm font-medium">Naziv</label>
+        <input
+          name="name"
+          required
+          maxlength="40"
+          placeholder="Npr. Follow-up, Dogovor demo, Vraćen…"
+          class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+        />
+      </div>
+      <div>
+        <label class="mb-1.5 block text-sm font-medium">Boja</label>
+        <div class="flex flex-wrap gap-1.5">
+          <label><input type="radio" name="color" value="#64748b" checked class="peer sr-only" required />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#64748b"></span>
+          </label>
+          <label><input type="radio" name="color" value="#3b82f6" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#3b82f6"></span>
+          </label>
+          <label><input type="radio" name="color" value="#22c55e" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#22c55e"></span>
+          </label>
+          <label><input type="radio" name="color" value="#f59e0b" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#f59e0b"></span>
+          </label>
+          <label><input type="radio" name="color" value="#ef4444" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#ef4444"></span>
+          </label>
+          <label><input type="radio" name="color" value="#8b5cf6" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#8b5cf6"></span>
+          </label>
+          <label><input type="radio" name="color" value="#ec4899" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#ec4899"></span>
+          </label>
+          <label><input type="radio" name="color" value="#0ea5e9" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform" style="background:#0ea5e9"></span>
+          </label>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4 text-sm">
+        <label class="flex items-center gap-2">
+          <input type="checkbox" name="isTerminalWon" class="h-4 w-4 rounded border-input accent-primary" />
+          <span>Won</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" name="isTerminalLost" class="h-4 w-4 rounded border-input accent-primary" />
+          <span>Lost</span>
+        </label>
+      </div>
+      <p data-status-msg class="hidden text-sm"></p>
+      <div class="flex justify-end gap-2 pt-2">
+        <button
+          type="button"
+          data-status-close
+          class="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+        >Otkaži</button>
+        <button
+          type="button"
+          class="js-status-submit inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+        >Sačuvaj</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script is:inline define:vars={{ LEAD_ID: id }}>
+  (function () {
+    var leadId = LEAD_ID;
+
+    // === Helper: toast wrapper if available ===
+    function toast(msg, kind) {
+      try { if (typeof window.flash === "function") window.flash(msg, kind || "info"); } catch (e) {}
+    }
+
+    // === Save indicator controller ===
+    var indicator = document.getElementById("contact-save-indicator");
+    var indicatorIcon = indicator ? indicator.querySelector("[data-indicator-icon]") : null;
+    var indicatorText = indicator ? indicator.querySelector("[data-indicator-text]") : null;
+    var saveHideTimer = null;
+    function setIndicator(state, msg) {
+      if (!indicator) return;
+      indicator.setAttribute("data-state", state);
+      var labels = {
+        idle:    { icon: "",         text: "Spreman" },
+        saving:  { icon: "⏳",       text: "Čuvam…" },
+        saved:   { icon: "✓",         text: "Sačuvano" },
+        error:   { icon: "⚠",        text: "Greška" },
+      };
+      var l = labels[state] || labels.idle;
+      if (indicatorIcon) indicatorIcon.textContent = l.icon;
+      if (indicatorText) indicatorText.textContent = msg || l.text;
+      indicator.style.opacity = "1";
+      if (saveHideTimer) clearTimeout(saveHideTimer);
+      if (state === "saved") {
+        saveHideTimer = setTimeout(function () { indicator.style.opacity = "0.4"; }, 1500);
+      }
+    }
+
+    // === EditableField inputs — PATCH on blur ===
+    var debouncers = {};
+    function coerce(fieldName, raw) {
+      if (raw === "" || raw == null) return null;
+      // Numeric fields
+      if (fieldName === "googleRating") {
+        var n = parseFloat(String(raw).replace(",", "."));
+        return isNaN(n) ? null : n;
+      }
+      if (fieldName === "reviewsCount") {
+        var n = parseInt(String(raw), 10);
+        return isNaN(n) ? null : n;
+      }
+      return String(raw);
+    }
+    document.querySelectorAll("[data-edit-field]").forEach(function (el) {
+      var fieldName = el.getAttribute("data-edit-field");
+      if (!fieldName) return;
+
+      function save() {
+        var val = el.value;
+        // Skip if value matches what we last sent (avoids blur->save loops when no change happened)
+        if (el.getAttribute("data-last-saved") === val) return;
+        setIndicator("saving");
+        var body = {};
+        body[fieldName] = coerce(fieldName, val);
+        fetch("/api/leads/" + leadId, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          if (r.ok) {
+            setIndicator("saved");
+            el.setAttribute("data-last-saved", val);
+          } else {
+            setIndicator("error", "HTTP " + r.status);
+            toast("Greška pri čuvanju " + fieldName, "error");
+          }
+        }).catch(function (err) {
+          setIndicator("error", err && err.message ? err.message : "Greška");
+        });
+      }
+
+      el.addEventListener("blur", function () {
+        // small debounce so the user can tab through without spamming
+        clearTimeout(debouncers[fieldName]);
+        debouncers[fieldName] = setTimeout(save, 300);
+      });
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && el.tagName !== "TEXTAREA") {
+          el.blur();
+        }
+      });
+    });
+
+    // === Header status select — PATCH on change ===
+    var statusSel = document.getElementById("header-status-select");
+    var statusInitial = statusSel ? (statusSel.getAttribute("data-initial-status") || "") : "";
+    if (statusSel) {
+      statusSel.addEventListener("change", function () {
+        var v = statusSel.value;
+        if (v === "__add__") { openStatusModal(); statusSel.value = statusInitial; return; }
+        var payload = { statusId: v === "__none__" ? null : Number(v) };
+        fetch("/api/leads/" + leadId, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then(function (r) {
+          if (r.ok) {
+            toast("Status ažuriran", "success");
+            statusInitial = v;
+          } else {
+            toast("Greška pri čuvanju statusa", "error");
+            statusSel.value = statusInitial;
+          }
+        }).catch(function () {
+          toast("Greška pri čuvanju statusa", "error");
+          statusSel.value = statusInitial;
+        });
+      });
+    }
+
+    // === Status create modal (inline) ===
+    var modal;
+    var colors = [
+      "#64748b","#ef4444","#f97316","#f59e0b","#eab308",
+      "#84cc16","#22c55e","#10b981","#14b8a6","#06b6d4",
+      "#0ea5e9","#3b82f6","#6366f1","#8b5cf6","#a855f7",
+      "#d946ef","#ec4899","#6b7280"
+    ];
+    function openStatusModal() {
+      var dlg = document.getElementById("status-create-modal");
+      if (!dlg) return;
+      try { dlg.showModal(); } catch (e) { console.error(e); }
+      setTimeout(function () {
+        var n = dlg.querySelector("[name='name']");
+        if (n) n.focus();
+      }, 30);
+    }
+    var dlgEl = document.getElementById("status-create-modal");
+    if (dlgEl) {
+      // wire submit
+      dlgEl.addEventListener("click", function (e) {
+        if (e.target === dlgEl) dlgEl.close();
+      });
+      var submitBtn = dlgEl.querySelector(".js-status-submit");
+      var formEl = dlgEl.querySelector("[data-status-form]");
+      var msgEl = dlgEl.querySelector("[data-status-msg]");
+      var closeBtn = dlgEl.querySelector("[data-status-close]");
+      if (closeBtn) closeBtn.addEventListener("click", function () { dlgEl.close(); });
+      if (submitBtn && formEl) {
+        submitBtn.addEventListener("click", function () {
+          var payload = {
+            name: (formEl.querySelector("[name='name']") || {}).value || "",
+            color: (formEl.querySelector("[name='color']:checked") || {}).value || "#3b82f6",
+            isTerminalWon: !!((formEl.querySelector("[name='isTerminalWon']") || {}).checked),
+            isTerminalLost: !!((formEl.querySelector("[name='isTerminalLost']") || {}).checked),
+          };
+          if (!payload.name.trim()) {
+            if (msgEl) { msgEl.textContent = "Ime je obavezno."; msgEl.className = "text-sm text-red-600"; }
+            return;
+          }
+          submitBtn.disabled = true;
+          if (msgEl) { msgEl.className = "hidden"; }
+          fetch("/api/statuses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              if (msgEl) {
+                msgEl.textContent = (res.d && res.d.error) || ("HTTP " + res.ok);
+                msgEl.className = "text-sm text-red-600";
+              }
+              return;
+            }
+            // add to header select
+            if (statusSel) {
+              var opt = document.createElement("option");
+              opt.value = String(res.d.id);
+              opt.textContent = res.d.name;
+              opt.style.color = res.d.color;
+              // insert before "__none__"
+              var noneOpt = statusSel.querySelector("option[value='__none__']");
+              if (noneOpt) statusSel.insertBefore(opt, noneOpt);
+              else statusSel.appendChild(opt);
+              statusSel.value = String(res.d.id);
+              statusSel.dispatchEvent(new Event("change"));
+            }
+            if (msgEl) {
+              msgEl.textContent = "Sačuvano.";
+              msgEl.className = "text-sm text-success";
+            }
+            setTimeout(function () { dlgEl.close(); if (msgEl) msgEl.className = "hidden"; }, 600);
+          }).catch(function (err) {
+            if (msgEl) {
+              msgEl.textContent = (err && err.message) || "Greška";
+              msgEl.className = "text-sm text-red-600";
+            }
+          }).then(function () { submitBtn.disabled = false; });
+        });
+      }
+    }
+  })();
+</script>
+
+<script is:inline>
+  (function () {
+    // === Site scrape progress ===
+    var startBtn = document.getElementById("start-site-scrape");
+    var progressBox = document.getElementById("site-scrape-progress");
+    var stageEl = document.getElementById("ssp-stage");
+    var countEl = document.getElementById("ssp-count");
+    var barEl = document.getElementById("ssp-bar");
+    var msgEl = document.getElementById("ssp-msg");
+    var pollHandle = null;
+
+    function setProgress(stage, count, total, msg) {
+      stageEl.textContent = stage || "U toku…";
+      countEl.textContent = count + " / " + (total || "?");
+      var pct = total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0;
+      barEl.style.width = pct + "%";
+      msgEl.textContent = msg || "";
+    }
+
+    async function pollStatus(jobId) {
+      try {
+        var r = await fetch("/api/scrape/status/" + jobId, { headers: { "Origin": location.origin } });
+        if (!r.ok) return;
+        var d = await r.json();
+        // Mapiraj scraper job stanje na progress UI.
+        // Job ima: status (running/done/error), pages_scraped, total_pages, screenshot
+        var stage = d.status === "done" ? "✅ Gotovo"
+                  : d.status === "error" ? "❌ Greška"
+                  : d.pages_scraped > 0 ? "Scrape stranica"
+                  : "Tražim sitemap";
+        var msg = "";
+        if (d.error) msg = d.error;
+        else if (d.pages_scraped === 0 && d.total_pages === 0) msg = "Skeniram sitemap…";
+        else if (d.pages_scraped < d.total_pages) msg = "Scrape-ujem stranu " + (d.pages_scraped + 1) + " od " + d.total_pages;
+        else if (d.screenshot) msg = "Screenshot sačuvan";
+        setProgress(stage, d.pages_scraped || 0, d.total_pages || 0, msg);
+        if (d.status === "done" || d.status === "error") {
+          if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+          startBtn.disabled = false;
+          startBtn.textContent = "🔄 Ponovo scrape sajta";
+          if (d.status === "done") {
+            // Auto-reload posle 1.2s da se prikaže novi screenshot
+            reloadTimer = setTimeout(function () { window.location.reload(); }, 1200);
+          }
+        }
+      } catch (e) {
+        msgEl.textContent = "Polling greška: " + e.message;
+      }
+    }
+
+    if (startBtn) {
+      startBtn.addEventListener("click", async function () {
+        var leadId = startBtn.getAttribute("data-lead-id");
+        if (!leadId) return;
+        // Ako je već u toku, ignoriši
+        if (pollHandle) return;
+        startBtn.disabled = true;
+        startBtn.textContent = "⏳ Pokrećem…";
+        progressBox.classList.remove("hidden");
+        setProgress("Pokrećem…", 0, 0, "Šaljem zahtev scraper-u");
+        try {
+          var r = await fetch("/api/scrape", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Origin": location.origin },
+            body: JSON.stringify({ leadId: Number(leadId) }),
+          });
+          var d = await r.json();
+          if (!r.ok || !d.jobId) {
+            throw new Error(d.error || "Scraper greška");
+          }
+          pollHandle = setInterval(function () { pollStatus(d.jobId); }, 1500);
+          pollStatus(d.jobId);
+        } catch (e) {
+          setProgress("❌ Greška", 0, 0, e.message);
+          startBtn.disabled = false;
+          startBtn.textContent = "🔄 Pokreni scrape sajta";
+        }
+      });
+    }
+
+    // === Screenshot lightbox ===
+    var lb = document.getElementById("screenshot-lightbox");
+    var lbImg = document.getElementById("lb-img");
+    var lbCap = document.getElementById("lb-caption");
+    var lbClose = document.getElementById("lb-close");
+    var lbOpen = document.getElementById("lb-open-new");
+
+    function openLightbox(src, caption) {
+      if (!lb) return;
+      lbImg.src = src;
+      lbCap.textContent = caption || "";
+      lbOpen.setAttribute("data-src", src);
+      lb.classList.remove("hidden");
+      lb.classList.add("flex");
+      document.body.style.overflow = "hidden";
+    }
+    function closeLightbox() {
+      if (!lb) return;
+      lb.classList.add("hidden");
+      lb.classList.remove("flex");
+      lbImg.src = "";
+      document.body.style.overflow = "";
+    }
+    document.querySelectorAll(".screenshot-thumb").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        openLightbox(btn.getAttribute("data-src"), btn.getAttribute("data-caption"));
+      });
+    });
+    if (lbClose) lbClose.addEventListener("click", closeLightbox);
+    if (lbOpen) lbOpen.addEventListener("click", function () {
+      var src = lbOpen.getAttribute("data-src");
+      if (src) window.open(src, "_blank");
+    });
+    if (lb) {
+      // Klik na pozadinu (ne na sliku) zatvara
+      lb.addEventListener("click", function (e) {
+        if (e.target === lb || e.target === lbCap) closeLightbox();
+      });
+    }
+    // ESC zatvara
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeLightbox();
+    });
+  })();
+</script>

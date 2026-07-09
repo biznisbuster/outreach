@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="sr" class="dark">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="/_astro/globals.C3JnuS2C.css">
+<title>Dark debug</title>
+<style>
+  body { margin: 0; padding: 20px; font-family: sans-serif; }
+  #debug { position: fixed; top: 0; left: 0; right: 0; background: yellow; padding: 8px; font-family: monospace; font-size: 10px; z-index: 9999; }
+  .swatch { padding: 16px; border-radius: 8px; min-height: 40px; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<pre id="debug"></pre>
+<div class="swatch bg-background">A</div>
+<div class="swatch bg-card">B</div>
+
+<script>
+  var root = document.documentElement;
+  var cs = getComputedStyle(root);
+  var bodyCs = getComputedStyle(document.body);
+  var bgDiv = document.querySelector('.bg-background');
+  var bgCs = getComputedStyle(bgDiv);
+  document.getElementById('debug').textContent = 
+    'html.class=' + root.className + '\n' +
+    '--color-background=' + cs.getPropertyValue('--color-background') + '\n' +
+    '--color-card=' + cs.getPropertyValue('--color-card') + '\n' +
+    'body bg-color=' + bodyCs.backgroundColor + '\n' +
+    'bg-bg div bg-color=' + bgCs.backgroundColor;
+</script>
+</body>
+</html>

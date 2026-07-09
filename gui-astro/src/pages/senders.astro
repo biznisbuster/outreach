@@ -1,0 +1,156 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import { getDb, schema } from "../lib/db";
+import { getSettingInt } from "../lib/settings";
+import { desc, eq } from "drizzle-orm";
+
+const db = getDb();
+const senders = db.select().from(schema.senders).orderBy(desc(schema.senders.id)).all();
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+// Default-i za novi sender — čitaju se iz settings (DB > env > default).
+const defaultDailyCap = getSettingInt("default_sender_daily_cap") || 50;
+const defaultHourlyCap = getSettingInt("default_sender_hourly_cap") || 10;
+const defaultMinDelay = getSettingInt("default_min_delay_sec") || 30;
+const defaultMaxDelay = getSettingInt("default_max_delay_sec") || 120;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const op = form.get("op");
+  const id = Number(form.get("id"));
+
+  if (op === "delete") {
+    db.delete(schema.senders).where(eq(schema.senders.id, id)).run();
+    return Astro.redirect("/senders?ok=Obrisano", 303);
+  }
+  if (op === "test") {
+    const testEmail = String(form.get("testEmail") ?? "");
+    if (!testEmail) return Astro.redirect("/senders?error=Email+obavezan", 303);
+    const [s] = db.select().from(schema.senders).where(eq(schema.senders.id, id)).all();
+    if (!s) return Astro.redirect("/senders?error=Sender+ne+postoji", 303);
+    try {
+      const { decrypt } = await import("../lib/crypto");
+      const { getTransporter } = await import("../lib/email/sender");
+      const password = decrypt(s.passwordEncrypted);
+      const tr = getTransporter(s.smtpHost, s.smtpPort, s.username, password);
+      const info = await tr.sendMail({
+        from: `"${s.fromName}" <${s.email}>`,
+        to: testEmail,
+        subject: "Outreach test email",
+        text: "Ako čitaš ovo, SMTP radi.",
+      });
+      return Astro.redirect(`/senders?ok=Poslato:+${info.messageId ?? "OK"}`, 303);
+    } catch (e) {
+      return Astro.redirect(`/senders?error=${encodeURIComponent("SMTP greška: " + (e as Error).message)}`, 303);
+    }
+  }
+  if (op === "create") {
+    const { encrypt } = await import("../lib/crypto");
+    db.insert(schema.senders).values({
+      email: String(form.get("email")),
+      fromName: String(form.get("fromName")),
+      smtpHost: String(form.get("smtpHost")),
+      smtpPort: Number(form.get("smtpPort")),
+      username: String(form.get("username")),
+      passwordEncrypted: encrypt(String(form.get("password"))),
+      dailyCap: Number(form.get("dailyCap") || defaultDailyCap),
+      hourlyCap: Number(form.get("hourlyCap") || defaultHourlyCap),
+      minDelaySec: Number(form.get("minDelaySec") || defaultMinDelay),
+      maxDelaySec: Number(form.get("maxDelaySec") || defaultMaxDelay),
+      active: form.get("active") === "on",
+    }).run();
+    return Astro.redirect("/senders?ok=Sender+kreiran", 303);
+  }
+}
+---
+<AppLayout title="Senderi — Outreach">
+  <div>
+    <div class="border-b px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Senderi</h1>
+      <p class="text-sm text-muted-foreground">{senders.length} SMTP konfiguracija</p>
+    </div>
+
+    <div class="space-y-6 p-6">
+      {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
+      {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base">+ Novi sender</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form method="POST" class="grid grid-cols-2 gap-3">
+            <input type="hidden" name="op" value="create" />
+            <input name="email" type="email" required placeholder="email@tvoidomen.rs" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="fromName" required placeholder="Ime pošiljaoca" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="smtpHost" required placeholder="smtp.tvojdomen.rs" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="smtpPort" type="number" value="465" placeholder="465" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="username" required placeholder="Korisničko ime (obicno = email)" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="password" type="password" required placeholder="SMTP lozinka (šifrovaće se)" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="dailyCap" type="number" value={defaultDailyCap} placeholder="Daily cap" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="hourlyCap" type="number" value={defaultHourlyCap} placeholder="Hourly cap" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="minDelaySec" type="number" value={defaultMinDelay} placeholder="Min delay (s)" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <input name="maxDelaySec" type="number" value={defaultMaxDelay} placeholder="Max delay (s)" class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <label class="col-span-2 flex items-center gap-2 text-sm">
+              <input name="active" type="checkbox" checked /> Aktivan
+            </label>
+            <div class="col-span-2 flex justify-end">
+              <button class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Dodaj</button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th class="px-4 py-2">Email</th>
+                <th class="px-4 py-2">From name</th>
+                <th class="px-4 py-2">SMTP</th>
+                <th class="px-4 py-2">Cap d/h</th>
+                <th class="px-4 py-2">Delay s</th>
+                <th class="px-4 py-2">Aktivan</th>
+                <th class="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y">
+              {senders.length === 0 ? (
+                <tr><td colspan="7" class="px-4 py-8 text-center text-muted-foreground">Nema sendera.</td></tr>
+              ) : senders.map((s) => (
+                <tr>
+                  <td class="px-4 py-2 font-medium">{s.email}</td>
+                  <td class="px-4 py-2">{s.fromName}</td>
+                  <td class="px-4 py-2 text-xs">{s.smtpHost}:{s.smtpPort}</td>
+                  <td class="px-4 py-2 text-xs">{s.dailyCap} / {s.hourlyCap}</td>
+                  <td class="px-4 py-2 text-xs">{s.minDelaySec}-{s.maxDelaySec}</td>
+                  <td class="px-4 py-2">{s.active ? "✓" : "✗"}</td>
+                  <td class="px-4 py-2">
+                    <div class="flex gap-1">
+                      <form method="POST" class="flex items-center gap-1">
+                        <input type="hidden" name="op" value="test" />
+                        <input type="hidden" name="id" value={String(s.id)} />
+                        <input name="testEmail" type="email" placeholder="test@…" required class="h-7 w-32 rounded border bg-transparent px-2 text-xs" />
+                        <button class="text-xs text-primary hover:underline">Test</button>
+                      </form>
+                      <form method="POST" onsubmit="return confirm('Obrisati sender?')">
+                        <input type="hidden" name="op" value="delete" />
+                        <input type="hidden" name="id" value={String(s.id)} />
+                        <button class="text-xs text-red-600 hover:underline">Obriši</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  </div>
+</AppLayout>

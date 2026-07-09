@@ -1,0 +1,35 @@
+---
+/**
+ * SourceBadge — colored source label (Maps / CSV / Manual / etc.)
+ *
+ * <SourceBadge source="maps" />  → "Maps"
+ * <SourceBadge source="csv" />   → "CSV"
+ */
+
+const SOURCE_META: Record<string, { label: string; cls: string }> = {
+  maps: { label: "Maps", cls: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800" },
+  google_maps: { label: "Maps", cls: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800" },
+  csv: { label: "CSV", cls: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800" },
+  json: { label: "JSON", cls: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800" },
+  manual: { label: "Ručno", cls: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700" },
+  import: { label: "Import", cls: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800" },
+  enrichment: { label: "Enrich", cls: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800" },
+  scrape: { label: "Scrape", cls: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800" },
+};
+
+interface Props {
+  source: string | null | undefined;
+  size?: "sm" | "md";
+  class?: string;
+}
+
+const { source, size = "md", class: cls = "" } = Astro.props;
+const meta = (source && SOURCE_META[source.toLowerCase()]) ?? {
+  label: source || "—",
+  cls: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
+};
+const sz = size === "sm" ? "px-1.5 py-0 text-[10px]" : "px-1.5 py-0.5 text-[10px]";
+---
+<span class={`inline-flex items-center rounded border font-medium ${sz} ${meta.cls} ${cls}`}>
+  {meta.label}
+</span>

@@ -1,0 +1,246 @@
+---
+/**
+ * StatusSelect — <select> + "+ Dodaj novi status" dugme koje otvara modal.
+ *
+ * Važno: Modal `<dialog>` se renderuje TU (unutar komponente), ali se na
+ * otvaranje premesta u `document.body` da izbegne HTML5 quirk gde nested
+ * `<form>` unutar drugog `<form>` automatski zatvara outer formu.
+ *
+ * API:
+ *  - name:         ime <select> polja
+ *  - value:        ID trenutno selektovanog statusa
+ *  - statuses:     lista statusa iz baze
+ *  - includeEmpty: da li prikazati "Bez statusa"
+ *  - returnTo:     URL za redirect (fallback ako JS ne radi)
+ */
+interface Status {
+  id: number;
+  name: string;
+  color: string;
+  isTerminalWon: boolean;
+  isTerminalLost: boolean;
+  isActive: boolean;
+}
+
+interface Props {
+  name: string;
+  value?: string | number | null;
+  statuses: Status[];
+  includeEmpty?: boolean;
+  emptyLabel?: string;
+  returnTo: string;
+  class?: string;
+  id?: string;
+}
+const {
+  name,
+  value,
+  statuses,
+  includeEmpty = false,
+  emptyLabel = "Bez statusa",
+  returnTo,
+  class: cls = "",
+  id = crypto.randomUUID(),
+} = Astro.props;
+
+const colors = [
+  "#64748b", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+  "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+  "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7",
+  "#d946ef", "#ec4899", "#6b7280",
+];
+---
+<div class={cls}>
+  <select
+    id={`select-${id}`}
+    name={name}
+    class="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm"
+  >
+    {includeEmpty && <option value="">{emptyLabel}</option>}
+    {statuses.map((s) => (
+      <option value={String(s.id)} selected={String(value ?? "") === String(s.id)}>{s.name}</option>
+    ))}
+  </select>
+  <button
+    type="button"
+    id={`trigger-${id}`}
+    class="mt-1 text-xs text-primary hover:underline"
+    data-target={`status-modal-${id}`}
+  >
+    + Dodaj novi status
+  </button>
+</div>
+
+<!-- Modal se renderuje, ali će JS pre otvaranja premestiti u body kako bi
+     izbegao nested-form quirk. -->
+<dialog id={`status-modal-${id}`} class="rounded-lg border-0 bg-transparent p-0 backdrop:bg-black/40">
+  <div class="w-96 rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-slate-900">Novi status</h2>
+      <button type="button" class={`js-close-modal-${id} text-slate-400 hover:text-slate-700`}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id={`status-form-${id}`} data-status-form class="space-y-3" data-returnto={returnTo}>
+      <div>
+        <label class="text-sm font-medium text-slate-900">Naziv</label>
+        <input name="name" required maxlength="40" placeholder="Npr. Follow-up, Dogovor demo, Vraćen…" class="mt-1 flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm" />
+      </div>
+
+      <div>
+        <label class="text-sm font-medium text-slate-900">Boja</label>
+        <div class="mt-1 flex flex-wrap gap-1.5">
+          {colors.map((c, i) => (
+            <label>
+              <input
+                type="radio"
+                name="color"
+                value={c}
+                checked={i === 0}
+                class="peer sr-only"
+                required
+              />
+              <span
+                class="block h-7 w-7 cursor-pointer rounded-full border-2 border-transparent ring-offset-2 peer-checked:border-primary peer-checked:ring-2 peer-checked:ring-primary/40 hover:scale-110 transition-transform"
+                style={`background:${c}`}
+              ></span>
+            </label>
+          ))}
+          <label>
+            <input type="color" name="colorCustom" value="#3b82f6" class="peer sr-only" />
+            <span class="block h-7 w-7 cursor-pointer rounded-md border border-slate-200 bg-white text-[10px] font-bold leading-7 text-center text-slate-500 peer-checked:border-primary">⋯</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-4 text-sm">
+        <label class="flex items-center gap-2">
+          <input type="checkbox" name="isTerminalWon" class="h-4 w-4 rounded border-slate-300" />
+          <span>Terminal Won (uspeh)</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" name="isTerminalLost" class="h-4 w-4 rounded border-slate-300" />
+          <span>Terminal Lost (neuspeh)</span>
+        </label>
+      </div>
+
+      <div id={`status-msg-${id}`} class="hidden text-sm"></div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" class={`js-close-modal-${id} inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm hover:bg-slate-50`}>
+          Otkaži
+        </button>
+        <button type="button" class="js-submit-status inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
+          Sačuvaj
+        </button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script is:inline define:vars={{ id }}>
+  (function () {
+    var dlg = document.getElementById("status-modal-" + id);
+    var trig = document.getElementById("trigger-" + id);
+    var form = document.getElementById("status-form-" + id);
+    var selectId = "select-" + id;
+
+    if (!dlg || !trig) {
+      console.warn("[StatusSelect] missing dialog or trigger", { dlg: !!dlg, trig: !!trig, id: id });
+      return;
+    }
+
+    // KLJUČNO: prebaci modal u body da izbegne nested-form quirk.
+    // (HTML5 parser zatvara outer <form> kad naiđe na inner <form>.)
+    if (dlg.parentElement !== document.body) {
+      document.body.appendChild(dlg);
+    }
+    // Sada kad je dialog u body-u, ponovo nađi "form" (koji je zapravo <div>)
+    form = dlg.querySelector("[data-status-form]") || dlg.querySelector("form");
+
+    // Trigger → otvori modal
+    trig.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        dlg.showModal();
+      } catch (err) {
+        console.error("[StatusSelect] showModal failed:", err);
+      }
+    });
+
+    // Close handleri
+    document.querySelectorAll(".js-close-modal-" + id).forEach(function (btn) {
+      btn.addEventListener("click", function () { dlg.close(); });
+    });
+    // Klik na backdrop (samo na <dialog> sam)
+    dlg.addEventListener("click", function (e) {
+      if (e.target === dlg) dlg.close();
+    });
+
+    // Submit → POST → dodaj u dropdown
+    var submitBtn = form.querySelector(".js-submit-status");
+    if (submitBtn) {
+      submitBtn.addEventListener("click", async function (e) {
+        e.preventDefault();
+        // Cita pojedinacna polja jer 'form' moze biti <div> (HTML5 nested-form workaround)
+        var get = function (n) { var el = form.querySelector('[name="' + n + '"]'); return el && (el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value); };
+        var payload = {
+          name: String(get("name") || "").trim(),
+          color: String(get("colorCustom") || get("color") || "#3b82f6"),
+          isTerminalWon: !!get("isTerminalWon"),
+          isTerminalLost: !!get("isTerminalLost"),
+        };
+        var fd2 = new FormData(); // dummy samo za proveru
+        fd2.append("x", "x"); // no-op
+        void fd2;
+        // Validacija client-side
+        if (!payload.name) {
+          msgEl.textContent = "Ime je obavezno.";
+          msgEl.className = "text-sm text-red-600";
+          return;
+        }
+        var msgEl = document.getElementById("status-msg-" + id);
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Čuvam…";
+        msgEl.className = "hidden text-sm";
+        try {
+          var r = await fetch("/api/statuses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Origin": location.origin },
+            body: JSON.stringify(payload),
+          });
+          var d = await r.json().catch(function () { return {}; });
+          if (!r.ok) {
+            msgEl.textContent = (d.error || ("HTTP " + r.status));
+            msgEl.className = "text-sm text-red-600";
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Sačuvaj";
+            return;
+          }
+          // Dodaj <option> u <select> i selektuj ga
+          var sel = document.getElementById(selectId);
+          if (sel) {
+            var existingOpt = sel.querySelector('option[value="' + d.id + '"]');
+            if (!existingOpt) {
+              var opt = document.createElement("option");
+              opt.value = String(d.id);
+              opt.textContent = d.name;
+              sel.appendChild(opt);
+            }
+            sel.value = String(d.id);
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          msgEl.textContent = "Sačuvano.";
+          msgEl.className = "text-sm text-emerald-600";
+          setTimeout(function () { dlg.close(); }, 500);
+        } catch (err) {
+          msgEl.textContent = err.message;
+          msgEl.className = "text-sm text-red-600";
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sačuvaj";
+        }
+      });
+    }
+  })();
+</script>

@@ -1,0 +1,753 @@
+---
+/**
+ * ScrapePanel — multi-query Google Maps scrape + bulk import.
+ *
+ * Input: textarea, jedna pretraga po liniji. Ceo string ide kao Google
+ * Maps keywords (npr. "cvecare beograd", "frizerski salon kruševac").
+ * Pokreće scrape-ove SEKVENCIJALNO (jedan po jedan da ne preplavi
+ * Google). Kad se svi završe, akumulira SVE redove u jednu listu i nudi
+ * jedan "Uvezi sve u kampanju" dugme.
+ *
+ * Props:
+ *   - defaultQuery?: string — initial value for the textarea (one query per line).
+ *     Used to pre-fill from campaign context (category + city) so the user only
+ *     has to click "Pokreni scrape".
+ *   - buttonLabel?: string — overrides the submit button text (default "Pokreni scrape").
+ *   - compact?: boolean — when true, the trigger form is single-row inline
+ *     (no label, no descriptive text, no big card chrome). The progress /
+ *     pipeline / done panels still render below the trigger in the same DOM
+ *     tree, just without their surrounding card chrome. Default false.
+ */
+interface Props {
+  defaultQuery?: string;
+  buttonLabel?: string;
+  compact?: boolean;
+}
+const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = Astro.props;
+---
+<div class={compact ? "space-y-3" : "space-y-4"}>
+  <form id="scrape-form" class={compact ? "flex items-center gap-2" : "space-y-2"}>
+    {compact ? (
+      <>
+        <textarea
+          id="s-queries"
+          rows="1"
+          placeholder={"cvecare beograd, cvecare kruševac"}
+          class="flex h-9 w-56 rounded-md border border-input bg-background px-3 py-1 text-sm font-mono transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+        >{defaultQuery}</textarea>
+        <button
+          type="submit"
+          id="scrape-start"
+          data-initial-label={buttonLabel}
+          class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        >
+          {buttonLabel}
+        </button>
+        <button
+          type="button"
+          id="scrape-stop"
+          class="hidden inline-flex h-9 items-center justify-center rounded-md border border-destructive/30 bg-destructive-soft px-3 text-sm font-medium text-destructive hover:bg-destructive/10"
+        >
+          Zaustavi
+        </button>
+        <span id="queries-count-wrap" class="hidden text-xs text-muted-foreground">
+          <strong id="queries-count" class="tabular-nums">0</strong> pretraga
+        </span>
+        <p id="queries-warning" class="hidden text-xs text-amber-700"></p>
+      </>
+    ) : (
+      <>
+        <div class="flex flex-wrap items-center gap-2">
+          <textarea
+            id="s-queries"
+            rows="1"
+            placeholder={"cvecare beograd, cvecare kruševac, frizerski salon novi sad"}
+            class="flex h-9 min-w-[260px] flex-1 rounded-md border border-input bg-background px-3 py-1 font-mono text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+          >{defaultQuery}</textarea>
+          <button
+            type="submit"
+            id="scrape-start"
+            data-initial-label={buttonLabel}
+            class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+          >
+            {buttonLabel}
+          </button>
+          <button
+            type="button"
+            id="scrape-stop"
+            class="hidden inline-flex h-9 items-center justify-center rounded-md border border-destructive/30 bg-destructive-soft px-4 text-sm font-medium text-destructive hover:bg-destructive/10"
+          >
+            Zaustavi
+          </button>
+          <span id="queries-count-wrap" class="hidden text-xs text-muted-foreground">
+            <strong id="queries-count" class="tabular-nums">0</strong> pretraga
+          </span>
+          <p id="queries-warning" class="hidden text-xs text-warning"></p>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Ceo tekst ide kao Google Maps pretraga. Više upita odvoji zarezom ili novom linijom (Shift+Enter).
+        </p>
+      </>
+    )}
+  </form>
+
+  <!-- Pipeline indicator (stepper) -->
+  <div id="pipeline" class="hidden w-full">
+    <ol class="flex flex-wrap items-center gap-x-1 gap-y-2 text-xs">
+      <li class="stage flex items-center gap-1.5" data-stage="startup">
+        <span class="stage-dot flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"><span class="stage-icon"></span></span>
+        <span class="stage-label text-muted-foreground">Startup</span>
+      </li>
+      <li class="stage-connector h-px w-4 shrink-0 bg-border sm:w-7"></li>
+      <li class="stage flex items-center gap-1.5" data-stage="search">
+        <span class="stage-dot flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"><span class="stage-icon"></span></span>
+        <span class="stage-label text-muted-foreground">Maps pretraga</span>
+      </li>
+      <li class="stage-connector h-px w-4 shrink-0 bg-border sm:w-7"></li>
+      <li class="stage flex items-center gap-1.5" data-stage="detail">
+        <span class="stage-dot flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"><span class="stage-icon"></span></span>
+        <span class="stage-label text-muted-foreground">Detalji</span>
+      </li>
+      <li class="stage-connector h-px w-4 shrink-0 bg-border sm:w-7"></li>
+      <li class="stage flex items-center gap-1.5" data-stage="email">
+        <span class="stage-dot flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"><span class="stage-icon"></span></span>
+        <span class="stage-label text-muted-foreground">Email extraction</span>
+      </li>
+      <li class="stage-connector h-px w-4 shrink-0 bg-border sm:w-7"></li>
+      <li class="stage flex items-center gap-1.5" data-stage="export">
+        <span class="stage-dot flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"><span class="stage-icon"></span></span>
+        <span class="stage-label text-muted-foreground">Gotovo</span>
+      </li>
+    </ol>
+  </div>
+
+  <!-- Status panel (trenutni job) -->
+  <div id="scrape-panel" class="hidden w-full space-y-3 rounded-lg border border-border bg-card p-4 shadow-xs">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <svg id="spinner" class="h-4 w-4 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="font-medium text-foreground" id="phase-label">Šaljem zahtev…</span>
+      </div>
+      <span class="text-xs text-muted-foreground tabular-nums" id="scrape-elapsed"></span>
+    </div>
+
+    <div class="text-xs text-muted-foreground" id="current-job"></div>
+
+    <div>
+      <div class="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+        <span id="scrape-count" class="tabular-nums">0 / 0</span>
+        <span id="scrape-eta"></span>
+      </div>
+      <div class="h-2 overflow-hidden rounded-full bg-muted">
+        <div id="scrape-bar" class="h-full rounded-full bg-primary transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <div id="scrape-msg" class="rounded-md border border-border bg-muted/40 p-2 font-mono text-xs text-foreground/80"></div>
+
+    <details class="group/events">
+      <summary class="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="transition-transform group-open/events:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        Event log (poslednjih 10)
+      </summary>
+      <ul id="scrape-events" class="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs text-muted-foreground"></ul>
+    </details>
+  </div>
+
+  <!-- Done panel (svi scrape-ovi završeni) -->
+  <div id="scrape-done" class="hidden w-full space-y-3 rounded-lg border border-success/30 bg-success-soft p-4">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <div class="font-medium text-foreground" id="done-title">Scrape završen</div>
+        <div class="mt-0.5 text-sm text-foreground/80" id="done-summary"></div>
+        <div class="mt-1 text-xs text-foreground/70" id="done-breakdown"></div>
+      </div>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-success" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 pt-2">
+      <button type="button" id="import-btn" class="inline-flex h-9 items-center rounded-md bg-success px-4 text-sm font-medium text-success-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-50">
+        Uvezi sve u kampanju
+      </button>
+      <label
+        class="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-warning/30 bg-warning-soft px-3 text-xs font-medium text-foreground hover:bg-warning-soft/80"
+        title="Ako je uključeno, preskače dedup logiku i ubaci SVE redove kao nove (čak i ako već postoje u nekoj kampanji). Korisno posle bulk delete da ponovo uvezeš iste biznise."
+      >
+        <input
+          type="checkbox"
+          id="import-force"
+          class="h-3.5 w-3.5 cursor-pointer accent-warning"
+        />
+        Uvezi svejedno
+      </label>
+      <a id="open-leads" href="/leads" class="inline-flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-accent">
+        Otvori leadove
+      </a>
+      <button type="button" id="restart-btn" class="inline-flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-accent">
+        Novi scrape
+      </button>
+      <button type="button" id="reload-btn" class="hidden inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]">
+        Pogledaj rezultate
+      </button>
+    </div>
+
+    <!-- Detaljna lista duplikata posle importa -->
+    <div id="duplicate-details" class="hidden"></div>
+  </div>
+</div>
+
+<script is:inline>
+  (function () {
+    var form = document.getElementById("scrape-form");
+    var queriesEl = document.getElementById("s-queries");
+    var queriesCount = document.getElementById("queries-count");
+    var queriesWarning = document.getElementById("queries-warning");
+    var btn = document.getElementById("scrape-start");
+    var stopBtn = document.getElementById("scrape-stop");
+    var pipeline = document.getElementById("pipeline");
+    var panel = document.getElementById("scrape-panel");
+    var phaseLabel = document.getElementById("phase-label");
+    var currentJobEl = document.getElementById("current-job");
+    var msg = document.getElementById("scrape-msg");
+    var count = document.getElementById("scrape-count");
+    var eta = document.getElementById("scrape-eta");
+    var bar = document.getElementById("scrape-bar");
+    var elapsed = document.getElementById("scrape-elapsed");
+    var events = document.getElementById("scrape-events");
+    var donePanel = document.getElementById("scrape-done");
+    var doneSummary = document.getElementById("done-summary");
+    var doneBreakdown = document.getElementById("done-breakdown");
+    var importBtn = document.getElementById("import-btn");
+    var openLeads = document.getElementById("open-leads");
+    var restartBtn = document.getElementById("restart-btn");
+    var reloadBtn = document.getElementById("reload-btn");
+
+    var campaignId = window.location.pathname.match(/^\/campaigns\/(\d+)/);
+    campaignId = campaignId ? Number(campaignId[1]) : null;
+    if (campaignId) openLeads.href = "/leads?campaignId=" + campaignId;
+
+    var STAGE_LABEL = {
+      startup: "Startup",
+      search: "Maps pretraga",
+      detail: "Detalji",
+      email: "Email extraction",
+      export: "Eksport",
+      done: "Gotovo",
+      captcha: "Captcha",
+    };
+
+    // STATE: drži listu query-eva i akumulirane redove za bulk import
+    var STATE = {
+      queries: [],            // ["cvecare beograd", "cvecare krusevac"]
+      currentIndex: 0,
+      jobIds: [],             // jobId za svaki query (ili null ako preskočen)
+      jobs: [],               // [{query, jobId, rows:[], status, error, rowsWritten}]
+      allRows: [],            // svi redovi spojeni za bulk import
+      pollHandle: null,
+      startTs: 0,
+      total: 0,
+      evList: [],
+      stopped: false,
+    };
+
+    var reloadTimer = null;   // auto-reload nakon uspešnog importa
+
+    // === helpers ===
+
+    // SVG icons used inside the stepper dots
+    var SPINNER_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+    var CHECK_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+    function setStage(s) {
+      var stages = ["startup", "search", "detail", "email", "export", "done"];
+      var reached = false;
+      for (var i = 0; i < stages.length; i++) {
+        var li = document.querySelector(".stage[data-stage='" + stages[i] + "']");
+        if (!li) continue;
+        var dot = li.querySelector(".stage-dot");
+        var label = li.querySelector(".stage-label");
+        var icon = li.querySelector(".stage-icon");
+
+        // remove prior state
+        dot.classList.remove(
+          "bg-muted", "text-muted-foreground", "border-border",
+          "bg-primary", "text-primary-foreground", "border-primary",
+          "bg-success", "text-success-foreground", "border-success"
+        );
+        label.classList.remove("text-muted-foreground", "text-primary", "text-success", "font-semibold");
+        icon.innerHTML = "";
+
+        if (stages[i] === s) {
+          // Active
+          dot.classList.add("bg-primary", "text-primary-foreground", "border-primary", "shadow-sm");
+          label.classList.add("text-primary", "font-semibold");
+          icon.innerHTML = SPINNER_SVG;
+          reached = true;
+        } else if (!reached) {
+          // Done (only stages before active)
+          dot.classList.add("bg-success", "text-success-foreground", "border-success");
+          label.classList.add("text-success");
+          icon.innerHTML = CHECK_SVG;
+        } else {
+          // Pending — re-apply base classes
+          dot.classList.add("bg-muted", "text-muted-foreground", "border-border");
+          label.classList.add("text-muted-foreground");
+          icon.innerHTML = '<span class="block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"></span>';
+        }
+      }
+
+      // Color the connectors between done stages
+      var connectors = document.querySelectorAll(".stage-connector");
+      for (var j = 0; j < connectors.length; j++) {
+        if (j < reachedIdx(s)) {
+          connectors[j].classList.add("bg-success");
+          connectors[j].classList.remove("bg-border");
+        } else {
+          connectors[j].classList.remove("bg-success");
+          connectors[j].classList.add("bg-border");
+        }
+      }
+    }
+
+    function reachedIdx(s) {
+      var stages = ["startup", "search", "detail", "email", "export", "done"];
+      return stages.indexOf(s);
+    }
+
+    // Captcha escalation: surface a captcha warning in the phase label.
+    (function () {
+      var origSet = setStage;
+      setStage = function (s) {
+        origSet(s);
+        if (s === "captcha") {
+          phaseLabel.textContent = "⚠ Captcha zahteva ponovni pokušaj";
+          phaseLabel.classList.add("text-warning");
+        } else {
+          phaseLabel.classList.remove("text-warning");
+        }
+      };
+    })();
+
+    function fmtElapsed(ms) {
+      var s = Math.floor(ms / 1000);
+      if (s < 60) return s + "s";
+      var m = Math.floor(s / 60); var ss = s % 60;
+      return m + "m " + String(ss).padStart(2, "0") + "s";
+    }
+
+    function setEta(done, total, elapsedMs) {
+      if (done > 0 && total && total > done && elapsedMs > 0) {
+        var rate = done / elapsedMs;
+        var remaining = (total - done) / rate;
+        var sm = Math.round(remaining / 1000);
+        if (sm < 60) eta.textContent = "ETA: ~" + sm + "s";
+        else eta.textContent = "ETA: ~" + Math.floor(sm / 60) + "m " + (sm % 60) + "s";
+      } else if (done === total && total > 0) {
+        eta.textContent = "Završeno";
+      } else {
+        eta.textContent = "";
+      }
+    }
+
+    function addEv(ev) {
+      STATE.evList.unshift(ev);
+      if (STATE.evList.length > 10) STATE.evList.length = 10;
+      events.innerHTML = STATE.evList.map(function (e) {
+        var d = new Date(e.timestamp || Date.now()).toLocaleTimeString();
+        return "<li><span class='text-muted-foreground/70'>" + d + "</span> <span class='text-foreground/80'>[" + e.stage + "/" + e.event + "]</span> " + (e.message || "") + "</li>";
+      }).join("");
+    }
+
+    function tickElapsed() {
+      elapsed.textContent = "Trajanje: " + fmtElapsed(Date.now() - STATE.startTs);
+    }
+
+    // === textarea helpers ===
+
+    function getQueries() {
+      return (queriesEl.value || "")
+        .split(/[\n,]+/)
+        .map(function (s) { return s.trim(); })
+        .filter(Boolean);
+    }
+
+    function refreshQueriesCount() {
+      var qs = getQueries();
+      queriesCount.textContent = String(qs.length);
+      var wrap = document.getElementById("queries-count-wrap");
+      if (wrap) wrap.classList.toggle("hidden", qs.length === 0);
+      if (qs.length > 10) {
+        queriesWarning.textContent = "⚠ " + qs.length + " pretraga može trajati dugo (sekvencijalno).";
+        queriesWarning.classList.remove("hidden");
+      } else {
+        queriesWarning.classList.add("hidden");
+      }
+    }
+    queriesEl.addEventListener("input", refreshQueriesCount);
+    refreshQueriesCount();
+
+    // === lifecycle ===
+
+    var elapsedIv = null;
+    var stopRequested = false;
+
+    function showRunningUI() {
+      btn.disabled = true;
+      btn.textContent = STATE.queries.length > 1
+        ? "Pretraga " + (STATE.currentIndex + 1) + " / " + STATE.queries.length
+        : "Pokrećem…";
+      stopBtn.classList.remove("hidden");
+      pipeline.classList.remove("hidden");
+      panel.classList.remove("hidden");
+      donePanel.classList.add("hidden");
+    }
+
+    function showStartUI() {
+      btn.disabled = false;
+      btn.textContent = btn.getAttribute("data-initial-label") || "Pokreni scrape";
+      stopBtn.classList.add("hidden");
+      if (elapsedIv) { clearInterval(elapsedIv); elapsedIv = null; }
+    }
+
+    function resetUI() {
+      STATE = {
+        queries: [], currentIndex: 0, jobIds: [], jobs: [],
+        allRows: [], pollHandle: null, startTs: 0, total: 0,
+        evList: [], stopped: false,
+      };
+      stopRequested = false;
+      msg.textContent = "";
+      count.textContent = "0 / 0";
+      bar.style.width = "0%";
+      elapsed.textContent = "Trajanje: 0s";
+      currentJobEl.textContent = "";
+      events.innerHTML = "";
+      // Reset stepper back to pending state
+      setStage("");
+      document.querySelectorAll(".stage-connector").forEach(function (c) {
+        c.classList.remove("bg-success");
+        c.classList.add("bg-border");
+      });
+      phaseLabel.classList.remove("text-amber-700", "text-red-700");
+      phaseLabel.textContent = "Šaljem zahtev…";
+      doneSummary.textContent = "";
+      doneBreakdown.textContent = "";
+      importBtn.textContent = "Uvezi sve u kampanju";
+      importBtn.classList.remove("hidden");
+      importBtn.disabled = false;
+      reloadBtn.classList.add("hidden");
+      showStartUI();
+      panel.classList.add("hidden");
+      pipeline.classList.add("hidden");
+      donePanel.classList.add("hidden");
+    }
+
+    // === start a single job ===
+
+    async function startOneJob(query) {
+      // Reset progress za ovaj job
+      STATE.total = 0;
+      STATE.evList = [];
+      events.innerHTML = "";
+      msg.textContent = "";
+      count.textContent = "0 / ?";
+      bar.style.width = "0%";
+
+      currentJobEl.textContent =
+        "Pretraga " + (STATE.currentIndex + 1) + " / " + STATE.queries.length +
+        ": " + query;
+
+      try {
+        var r = await fetch("/api/scrape-leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Origin": location.origin },
+          body: JSON.stringify({
+            query: query, country: "RS", language: "sr",
+            max_results: 25, extract_emails: true,
+          }),
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.jobId) {
+          var errMsg = (d && d.error) || ("HTTP " + r.status);
+          STATE.jobs.push({ query: query, jobId: null, rows: [], status: "failed", error: errMsg, rowsWritten: 0 });
+          msg.innerHTML = "<span class='text-red-600'>" + errMsg + "</span>";
+          return { ok: false, error: errMsg };
+        }
+        STATE.jobIds.push(d.jobId);
+        STATE.jobs.push({ query: query, jobId: d.jobId, rows: [], status: "running", error: null, rowsWritten: 0 });
+        phaseLabel.textContent = "Scrape pokrenut: " + d.jobId;
+        return { ok: true, jobId: d.jobId };
+      } catch (e) {
+        STATE.jobs.push({ query: query, jobId: null, rows: [], status: "failed", error: e.message, rowsWritten: 0 });
+        msg.innerHTML = "<span class='text-red-600'>Mrežna greška: " + e.message + "</span>";
+        return { ok: false, error: e.message };
+      }
+    }
+
+    // === poll single job until done ===
+
+    function waitForJobFinish(jobId) {
+      return new Promise(function (resolve) {
+        var job = STATE.jobs[STATE.jobs.length - 1];
+        function loop() {
+          if (stopRequested) {
+            job.status = "stopped";
+            resolve();
+            return;
+          }
+          fetch("/api/scrape-leads/progress/" + jobId, { headers: { "Origin": location.origin } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; })
+            .then(function (pd) {
+              var ev = pd && pd.snapshot && pd.snapshot.last_event;
+              if (ev) {
+                STATE.total = ev.total || STATE.total;
+                count.textContent = ev.count + (STATE.total ? " / " + STATE.total : "");
+                var pct = STATE.total ? Math.min(100, Math.round(ev.count / STATE.total * 100)) : 0;
+                bar.style.width = pct + "%";
+                msg.textContent = "[" + ev.stage + "] " + (ev.message || ev.event);
+                phaseLabel.textContent = STAGE_LABEL[ev.stage] || ev.stage;
+                addEv(ev);
+                setStage(ev.stage);
+                setEta(ev.count, STATE.total, Date.now() - STATE.startTs);
+              }
+              return fetch("/api/scrape-leads/status/" + jobId, { headers: { "Origin": location.origin } });
+            })
+            .then(function (r) { return r ? r.json() : null; })
+            .catch(function () { return null; })
+            .then(function (sd) {
+              if (!sd) { setTimeout(loop, 1500); return; }
+              var st = sd.status;
+              job.rowsWritten = sd.rowsWritten || 0;
+              if (st === "done" || st === "empty" || st === "captcha" || st === "failed") {
+                job.status = st;
+                job.error = sd.error || null;
+                setStage(st === "done" ? "done" : st);
+                resolve();
+                return;
+              }
+              setTimeout(loop, 1500);
+            });
+        }
+        loop();
+      });
+    }
+
+    // === fetch rows for one finished job ===
+
+    async function fetchJobRows(jobId) {
+      // VAŽNO: scraper-leads endpoint je POST (FastAPI @app.post). Stari GET
+      // je vraćao 405 "Method Not Allowed" pa je import prikazivao prazno.
+      var r = await fetch("/api/scrape-leads/import/" + jobId, {
+        method: "POST",
+        headers: { "Origin": location.origin },
+      });
+      if (!r.ok) {
+        var txt = await r.text().catch(function () { return ""; });
+        throw new Error("HTTP " + r.status + ": " + txt);
+      }
+      var data = await r.json();
+      return (data && data.rows) || [];
+    }
+
+    // === main flow ===
+
+    async function runAll() {
+      STATE.startTs = Date.now();
+      elapsedIv = setInterval(tickElapsed, 500);
+      showRunningUI();
+
+      for (STATE.currentIndex = 0; STATE.currentIndex < STATE.queries.length; STATE.currentIndex++) {
+        if (stopRequested) break;
+        var query = STATE.queries[STATE.currentIndex];
+        btn.textContent = STATE.queries.length > 1
+          ? "Pretraga " + (STATE.currentIndex + 1) + " / " + STATE.queries.length
+          : "Pokrećem…";
+
+        var started = await startOneJob(query);
+        if (!started.ok) continue;
+
+        // čekaj da se ovaj job završi
+        await waitForJobFinish(started.jobId);
+
+        // akumuliraj redove ako je uspeo
+        var job = STATE.jobs[STATE.jobs.length - 1];
+        if (job.status === "done" && job.jobId) {
+          try {
+            job.rows = await fetchJobRows(job.jobId);
+            STATE.allRows = STATE.allRows.concat(job.rows);
+          } catch (e) {
+            job.error = (job.error ? job.error + "; " : "") + "fetch rows: " + e.message;
+          }
+        }
+      }
+
+      if (elapsedIv) { clearInterval(elapsedIv); elapsedIv = null; }
+      showStartUI();
+
+      if (stopRequested) {
+        // korisnik je stao nasred
+        finishAll(false, "Pretraga zaustavljena. " + STATE.allRows.length + " leadova do sada.");
+        return;
+      }
+
+      // Svi završeni. Prikaži summary.
+      var total = STATE.allRows.length;
+      var successful = STATE.jobs.filter(function (j) { return j.status === "done"; }).length;
+      var failed = STATE.jobs.filter(function (j) { return j.status === "failed" || j.status === "captcha" || j.status === "empty"; }).length;
+      var totalTime = fmtElapsed(Date.now() - STATE.startTs);
+
+      if (total === 0) {
+        finishAll(true, "Nema rezultata ni za jednu pretragu. " + failed + " neuspešno.");
+        return;
+      }
+
+      var breakdown = STATE.jobs
+        .filter(function (j) { return j.rowsWritten > 0; })
+        .map(function (j, i) { return (i + 1) + ". " + j.query + " → " + j.rowsWritten; })
+        .join(" · ");
+      finishAll(true, "Pronađeno ukupno " + total + " leadova iz " + successful + " pretraga za " + totalTime + ".", breakdown);
+    }
+
+    function finishAll(success, summary, breakdown) {
+      bar.style.width = "100%";
+      doneSummary.textContent = summary;
+      doneBreakdown.textContent = breakdown || "";
+      panel.classList.add("hidden");
+      pipeline.classList.add("hidden");
+      donePanel.classList.remove("hidden");
+      if (success && STATE.allRows.length > 0) {
+        importBtn.disabled = false;
+        importBtn.classList.remove("hidden");
+        importBtn.textContent = "Uvezi sve u kampanju (" + STATE.allRows.length + ")";
+        reloadBtn.classList.add("hidden");
+      } else {
+        importBtn.disabled = true;
+        importBtn.textContent = "Nema rezultata za uvoz";
+      }
+    }
+
+    function showReloadCta() {
+      // Sakrij import dugme, prikaži "Pogledaj rezultate" + "Novi scrape"
+      importBtn.classList.add("hidden");
+      reloadBtn.classList.remove("hidden");
+      // Ako korisnik klikne pre auto-reload-a, otkaži timer
+      reloadBtn.addEventListener("click", function () {
+        if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+        window.location.reload();
+      }, { once: true });
+    }
+
+    // === event handlers ===
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var qs = getQueries();
+      if (qs.length === 0) {
+        msg.innerHTML = "<span class='text-amber-600'>Unesi bar jednu pretragu.</span>";
+        panel.classList.remove("hidden");
+        return;
+      }
+      resetUI();
+      STATE.queries = qs;
+      runAll();
+    });
+
+    stopBtn.addEventListener("click", function () {
+      stopRequested = true;
+      stopBtn.disabled = true;
+      stopBtn.textContent = "Zaustavljanje…";
+    });
+
+    importBtn.addEventListener("click", async function () {
+      var forceChk = document.getElementById("import-force");
+      var forceEnabled = forceChk && forceChk.checked;
+      importBtn.disabled = true;
+      importBtn.textContent = "Uvozim " + STATE.allRows.length + " leadova…";
+      try {
+        // Pošalji SVE akumulirane redove u jedan bulk import.
+        // jobId koristimo samo prvog joba za verifikaciju (server radi best-effort).
+        var firstJobId = STATE.jobIds[0] || "";
+        var ir = await fetch("/api/scrape-leads/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Origin": location.origin },
+          body: JSON.stringify({
+            jobId: firstJobId,
+            campaignId: campaignId,
+            force: forceEnabled,
+            rows: STATE.allRows,
+          }),
+        });
+        var id = await ir.json().catch(function () { return {}; });
+        if (ir.ok) {
+          var parts = [];
+          if (id.created) parts.push(id.created + " novih");
+          if (id.updated) parts.push(id.updated + " ažurirano");
+          if (id.duplicates) parts.push(id.duplicates + " duplikata");
+          if (id.skipped) parts.push(id.skipped + " preskočeno");
+          importBtn.textContent = "✅ Uvezeno: " + (parts.join(", ") || "0 izmena");
+          // ostavi dugme onemogućeno da korisnik ne uveze duplo
+          importBtn.classList.add("hidden");
+
+          // Prikaži CTA: "Pogledaj rezultate" (reload) + "Novi scrape" (reset)
+          showReloadCta(id, forceEnabled);
+
+          // Ako ima duplikata, prikaži detalje
+          if (id.duplicates > 0 && id.duplicateDetails && id.duplicateDetails.length > 0) {
+            showDuplicateDetails(id.duplicateDetails, id.duplicates);
+          }
+
+          // Auto-reload posle 1.5s da se vidi novi sadržaj (broj leadova,
+          // status distribucija, poslednjih 50 leadova — sve je SSR u Astro-u,
+          // pa ne možemo da apdejtujemo bez roundtrip-a).
+          reloadTimer = setTimeout(function () {
+            window.location.reload();
+          }, 1500);
+        } else {
+          importBtn.textContent = "Greška: " + (id.error || ir.statusText);
+          importBtn.disabled = false;
+        }
+      } catch (e) {
+        importBtn.textContent = "Greška: " + e.message;
+        importBtn.disabled = false;
+      }
+    });
+
+    // Prikazuje detaljnu listu duplikata (koji su, gde su već, zašto su preskočeni).
+    function showDuplicateDetails(duplicates, dupCount) {
+      var box = document.getElementById("duplicate-details");
+      if (!box) return;
+      // Grupisanje po kampanji (postojećoj)
+      var byCampaign = {};
+      duplicates.forEach(function (d) {
+        var key = (d.existingCampaignName || "Bez kampanje") + " (id=" + d.existingCampaignId + ")";
+        if (!byCampaign[key]) byCampaign[key] = [];
+        byCampaign[key].push(d);
+      });
+      var html = '<div class="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">';
+      html += '<div class="mb-2 font-medium text-amber-900">' + dupCount + ' preskočeno jer već postoje u bazi:</div>';
+      Object.keys(byCampaign).forEach(function (campName) {
+        html += '<div class="mb-2"><div class="font-medium text-amber-800">Već u kampanji: ' + campName + '</div><ul class="ml-4 mt-1 space-y-0.5 list-disc">';
+        byCampaign[campName].forEach(function (d) {
+          var reasonMap = { web: "isti website", phone: "isti telefon", ime_grad: "isto ime+grad" };
+          var reasonTxt = reasonMap[d.reason] || d.reason;
+          var matchValShort = (d.matchValue || "").slice(0, 40);
+          html += '<li><span class="font-medium">' + d.name + '</span> <span class="text-amber-700">(' + reasonTxt + ': ' + matchValShort + ')</span></li>';
+        });
+        html += '</ul></div>';
+      });
+      html += '</div>';
+      box.innerHTML = html;
+      box.classList.remove("hidden");
+    }
+
+    restartBtn.addEventListener("click", function () {
+      // Ako je u toku auto-reload, otkaži
+      if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+      resetUI();
+      // očisti i tekstualni unos? ostavi — korisnik obično hoće isti query
+    });
+  })();
+</script>

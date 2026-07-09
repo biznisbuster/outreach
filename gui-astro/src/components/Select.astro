@@ -1,0 +1,32 @@
+---
+/**
+ * Select — styled <select> atom.
+ *
+ * <Select name="statusId">
+ *   <option value="">All</option>
+ *   <option value="1">Foo</option>
+ * </Select>
+ */
+interface Props {
+  name: string;
+  id?: string;
+  value?: string | number;
+  required?: boolean;
+  disabled?: boolean;
+  class?: string;
+  size?: "sm" | "md";
+}
+
+const { name, id, value, required, disabled, class: cls = "", size = "md" } = Astro.props;
+const sz = size === "sm" ? "h-8 text-xs" : "h-9 text-sm";
+---
+<select
+  name={name}
+  id={id}
+  value={value as any}
+  required={required}
+  disabled={disabled}
+  class={`flex w-full rounded-md border border-input bg-background px-3 py-1 ${sz} shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary disabled:cursor-not-allowed disabled:opacity-50 ${cls}`}
+>
+  <slot />
+</select>

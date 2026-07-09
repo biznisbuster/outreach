@@ -1,0 +1,253 @@
+---
+/**
+ * Podešavanja — centralna runtime konfiguracija aplikacije.
+ *
+ * UI: sidebar (anchor navigacija po grupama) + kartice (jedna po grupi).
+ * Svaka kartica ima opis cele sekcije + opise za svaki setting. Izvor
+ * (DB / env / default) je prikazan kao chip pored label-a.
+ *
+ * Reset: brisanje DB vrednosti za jedan key (sledeći getSetting čita
+ * env ili default). Submit dugme radi bulk save svih izmena.
+ */
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import CardDescription from "../components/CardDescription.astro";
+import SettingsRow from "../components/SettingsRow.astro";
+import {
+  getAllSettings,
+  groupSettings,
+  setSetting,
+  clearSetting,
+  SETTINGS_CATALOG,
+} from "../lib/settings";
+import { ImapFlow } from "imapflow";
+
+// ─── POST handler ───────────────────────────────────────────────────────
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const op = form.get("op");
+
+  if (op === "reset") {
+    const key = String(form.get("key") || "");
+    if (key && SETTINGS_CATALOG[key]) {
+      clearSetting(key);
+    }
+    return Astro.redirect("/settings?ok=Resetovano", 303);
+  }
+
+  if (op === "test-imap") {
+    try {
+      const host = String(form.get("imap_host") || "");
+      const user = String(form.get("imap_user") || "");
+      const pass = String(form.get("imap_password") || "");
+      const port = Number(form.get("imap_port") || 993);
+      const secure = String(form.get("imap_secure") || "1") === "1";
+      if (!host || !user || !pass) return Astro.redirect("/settings?error=IMAP+nije+konfigurisan", 303);
+      const c = new ImapFlow({ host, port, secure, auth: { user, pass }, logger: false });
+      await c.connect();
+      await c.logout();
+      return Astro.redirect("/settings?ok=IMAP+test+OK", 303);
+    } catch (e) {
+      return Astro.redirect(`/settings?error=${encodeURIComponent("IMAP greška: " + (e as Error).message)}`, 303);
+    }
+  }
+
+  // Bulk save
+  for (const [k, v] of form.entries()) {
+    if (typeof k !== "string" || k === "op" || k.startsWith("_")) continue;
+    const def = SETTINGS_CATALOG[k];
+    if (!def) continue;
+    const value = typeof v === "string" ? v : null;
+    if (value === "" || value === null) {
+      clearSetting(k);
+    } else {
+      setSetting(k, value, def.isSecret ?? false);
+    }
+  }
+  return Astro.redirect(`/settings?ok=${encodeURIComponent("Sačuvano")}`, 303);
+}
+
+// ─── GET handler ────────────────────────────────────────────────────────
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+
+const all = getAllSettings();
+const { groups } = groupSettings(all);
+---
+
+<AppLayout title="Podešavanja — Outreach">
+  <div>
+    <!-- Header -->
+    <div class="border-b px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Podešavanja</h1>
+      <p class="text-sm text-muted-foreground">
+        DB-backed runtime konfiguracija · <strong>DB</strong> ima prioritet nad <strong>env</strong> varijablama.
+        Promene se primenjuju odmah (osim ako opis polja ne kaže drugačije).
+      </p>
+    </div>
+
+    <!-- Banner -->
+    {ok ? (
+      <div class="mx-6 mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">{ok}</div>
+    ) : null}
+    {error ? (
+      <div class="mx-6 mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">{error}</div>
+    ) : null}
+
+    <!-- Layout: sidebar + main -->
+    <div class="flex gap-6 p-6">
+      <!-- Sticky sidebar -->
+      <aside class="hidden w-56 shrink-0 lg:block">
+        <nav class="sticky top-4 space-y-0.5" id="settings-nav">
+          <div class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Sekcije</div>
+          {groups.map((g) => (
+            <a
+              href={"#" + g.key}
+              data-group={g.key}
+              class="group/nav flex items-center justify-between rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <span class="truncate">{g.title}</span>
+              <span class="ml-2 inline-flex shrink-0 items-center justify-center rounded bg-muted px-1.5 text-[10px] font-normal text-muted-foreground">{g.items.length}</span>
+            </a>
+          ))}
+        </nav>
+      </aside>
+
+      <!-- Mobile: dropdown za sekcije -->
+      <div class="mb-4 w-full lg:hidden">
+        <label for="mobile-section-select" class="text-xs text-muted-foreground">Skoči na sekciju:</label>
+        <select
+          id="mobile-section-select"
+          class="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+          onchange="if(this.value){location.hash=this.value}"
+        >
+          {groups.map((g) => (
+            <option value={g.key}>{g.title}</option>
+          ))}
+        </select>
+      </div>
+
+      <!-- Main: kartice -->
+      <form method="POST" class="min-w-0 flex-1 space-y-6">
+        <input type="hidden" name="op" value="save" />
+
+        {groups.map((g) => (
+          <section id={g.key} class="scroll-mt-4" data-section={g.key}>
+            <Card>
+              <CardHeader>
+                <CardTitle class="flex items-center gap-2 text-base">
+                  <span>{g.title}</span>
+                  <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">{g.items.length}</span>
+                </CardTitle>
+                {g.description ? <CardDescription>{g.description}</CardDescription> : null}
+              </CardHeader>
+              <CardContent class="space-y-4">
+                {g.items.map((s) => <SettingsRow s={s} />)}
+
+                {g.key === "imap" ? (
+                  <div class="mt-4 border-t pt-4">
+                    <details class="text-sm">
+                      <summary class="cursor-pointer text-muted-foreground hover:text-foreground">Test IMAP konekcije (sa trenutnim vrednostima)</summary>
+                      <div class="mt-2 flex items-center gap-2">
+                        <button
+                          type="submit"
+                          formaction="/settings"
+                          formmethod="POST"
+                          name="op"
+                          value="test-imap"
+                          class="inline-flex h-9 items-center rounded-md bg-secondary px-4 text-sm font-medium hover:opacity-90"
+                        >
+                          Testiraj IMAP
+                        </button>
+                        <span class="text-xs text-muted-foreground">Koristi vrednosti koje su trenutno u formi (gore).</span>
+                      </div>
+                    </details>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </section>
+        ))}
+
+        <!-- Sticky submit -->
+        <div class="sticky bottom-4 flex justify-end">
+          <button type="submit" class="inline-flex h-10 items-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow-lg hover:opacity-90">
+            Sačuvaj sva podešavanja
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AppLayout>
+
+<script is:inline>
+  (function () {
+    // ─── Sidebar: active state na osnovu hash + IntersectionObserver ───
+    var navLinks = document.querySelectorAll("#settings-nav a[data-group]");
+    var sections = document.querySelectorAll("section[data-section]");
+
+    function setActive(key) {
+      navLinks.forEach(function (a) {
+        var isActive = a.getAttribute("data-group") === key;
+        if (isActive) {
+          a.classList.add("bg-primary-soft", "text-primary");
+          a.classList.remove("text-muted-foreground");
+        } else {
+          a.classList.remove("bg-primary-soft", "text-primary");
+          a.classList.add("text-muted-foreground");
+        }
+      });
+      var mobile = document.getElementById("mobile-section-select");
+      if (mobile) mobile.value = key;
+    }
+
+    function fromHash() {
+      var first = sections[0] ? sections[0].getAttribute("data-section") : "";
+      var hash = (location.hash || "#" + first).slice(1);
+      if (hash) setActive(hash);
+    }
+    window.addEventListener("hashchange", fromHash);
+    fromHash();
+
+    if ("IntersectionObserver" in window) {
+      var obs = new IntersectionObserver(
+        function (entries) {
+          var visible = entries
+            .filter(function (e) { return e.isIntersecting; })
+            .sort(function (a, b) { return a.boundingClientRect.top - b.boundingClientRect.top; })[0];
+          if (visible) {
+            var key = visible.target.getAttribute("data-section");
+            setActive(key);
+          }
+        },
+        { rootMargin: "-20% 0px -70% 0px", threshold: 0 }
+      );
+      sections.forEach(function (s) { obs.observe(s); });
+    }
+
+    // ─── Password reveal/hide toggle ───────────────────────────────────
+    document.querySelectorAll("[data-toggle-reveal]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var key = btn.getAttribute("data-toggle-reveal");
+        var input = document.getElementById(key);
+        if (!input) return;
+        var showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        btn.querySelector("[data-icon-hide]").classList.toggle("hidden", !showing);
+        btn.querySelector("[data-icon-show]").classList.toggle("hidden", showing);
+      });
+    });
+
+    // ─── Boolean toggle label sync ─────────────────────────────────────
+    document.querySelectorAll("[data-boolean-toggle]").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        var key = cb.getAttribute("data-boolean-toggle");
+        var lbl = document.querySelector("[data-boolean-label='" + key + "']");
+        if (lbl) lbl.textContent = cb.checked ? "Uključeno" : "Isključeno";
+      });
+    });
+  })();
+</script>

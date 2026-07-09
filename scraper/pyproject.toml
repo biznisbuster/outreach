@@ -1,0 +1,20 @@
+[project]
+name = "outreach-scraper"
+version = "0.1.0"
+description = "Scraper servis za Outreach — sitemap, SEO metrike, screenshot"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.28.0",
+    "trafilatura>=1.12.0",
+    "extruct>=0.16.0",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0",
+    "selectolax>=0.3.21",
+    "pillow>=11.0.0",
+    "apscheduler>=3.10.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0"]

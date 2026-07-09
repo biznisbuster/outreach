@@ -1,0 +1,6 @@
+name,address,city,country,phone_e164,phone_raw,website,email,category,rating,reviews_count,latitude,longitude,google_place_id,google_maps_url,hours_json,source,scraped_at
+Frizerski Studio Fantastiko,Stevana Sinđelića 5,Kruševac,RS,+38137422232,037422232,https://frizerski-fantastiko.rs,,Фризерски салон,4.7,53,43.5846402,21.3247454,ChIJzR1iIquHVkcRflU5Arb7m74,https://maps.google.com/?cid=0,,maps,2026-07-08T00:00:00+00:00
+Apoteka Dr Max,Kneza Miloša 12,Beograd,RS,+381111234567,011/234-567,https://www.drmax.rs/,,Apoteka,4.5,2100,44.8125,20.4612,ChIJexample1,,,maps,2026-07-08T00:00:00+00:00
+GitHub Office,Brace Radića 7,Beograd,RS,+381111234568,011/234-568,https://github.com,,IT kompanija,4.6,500,44.7866,20.4489,ChIJexample2,,,maps,2026-07-08T00:00:00+00:00
+Some Salon,,Kruševac,RS,,,,,Salon,,,44.0,20.0,,,,maps,2026-07-08T00:00:00+00:00
+Empty Website Row,Adresa 1,Niš,RS,+381111111,,https://nonesuch-host-for-test-xyz-12345.invalid,,Foo,,,43.32,21.32,,,,maps,2026-07-08T00:00:00+00:00

@@ -1,0 +1,46 @@
+---
+/**
+ * Card — base card surface. Slots content; consumers add CardHeader/Content/etc.
+ *
+ * <Card>
+ *   <CardHeader>
+ *     <CardTitle>Naslov</CardTitle>
+ *     <CardDescription>Opis</CardDescription>
+ *   </CardHeader>
+ *   <CardContent>…</CardContent>
+ * </Card>
+ *
+ * Variants: default | interactive | glass | flat
+ *   - default: standard card with shadow-xs
+ *   - interactive: hover lift (for clickable cards / sidebar items)
+ *   - glass: backdrop-blur surface (for over-image / over-gradient)
+ *   - flat: no shadow, border only (tight UI areas)
+ */
+interface Props {
+  variant?: "default" | "interactive" | "glass" | "flat";
+  padding?: "none" | "sm" | "md";
+  class?: string;
+}
+const {
+  variant = "default",
+  padding = "none",
+  class: cls = "",
+} = Astro.props;
+
+const VARIANTS = {
+  default: "bg-card border border-border shadow-xs",
+  interactive:
+    "bg-card border border-border shadow-xs card-hover cursor-pointer",
+  glass: "border border-border glass shadow-xs",
+  flat: "bg-card border border-border",
+};
+
+const PADDING = {
+  none: "",
+  sm: "p-4",
+  md: "p-6",
+};
+---
+<div class={`rounded-lg ${VARIANTS[variant]} ${PADDING[padding]} ${cls}`}>
+  <slot />
+</div>

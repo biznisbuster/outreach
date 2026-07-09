@@ -1,0 +1,69 @@
+---
+import "../styles/globals.css";
+
+if (Astro.locals.user) {
+  return Astro.redirect("/");
+}
+
+const error = Astro.url.searchParams.get("error");
+const callback = Astro.url.searchParams.get("callbackUrl") || "/";
+---
+<!doctype html>
+<html lang="sr" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <title>Prijava — Outreach</title>
+    {/* Pre-paint theme set: avoid FOUC */}
+    <script is:inline>
+      (function () {
+        try {
+          var t = localStorage.getItem("app_theme");
+          if (t === "dark") document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="h-full bg-background text-foreground antialiased">
+    <div class="flex min-h-screen items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-xl border border-border bg-card text-card-foreground shadow-lg">
+        <div class="flex flex-col items-center space-y-2 p-6 text-center">
+          <div class="mb-2 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-violet-500 text-primary-foreground shadow-md shadow-primary/30">
+            <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h1 class="text-2xl font-bold tracking-tight">Outreach</h1>
+          <p class="text-sm text-muted-foreground">Unesi šifru za pristup</p>
+        </div>
+        <div class="p-6 pt-0">
+          <form method="POST" action="/api/auth/login" class="space-y-4">
+            <input type="hidden" name="callbackUrl" value={callback} />
+            <div class="space-y-1.5">
+              <label for="password" class="text-sm font-medium">Šifra</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                autofocus
+                class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+              />
+            </div>
+            {error && (
+              <div class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive" role="alert">
+                {error}
+              </div>
+            )}
+            <button
+              type="submit"
+              class="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              Uđi
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

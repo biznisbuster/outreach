@@ -1,0 +1,40 @@
+---
+/**
+ * Field — label + control + hint + error wrapper.
+ *
+ * Slots:
+ *   - default: the control (Input, Select, Textarea)
+ *   - hint:    helper text shown below the control
+ *
+ * Props:
+ *   - label:   string
+ *   - htmlFor: id of the control
+ *   - required: shows required marker
+ *   - error:   string if validation failed
+ *   - description: optional text below label (italic muted)
+ */
+interface Props {
+  label: string;
+  htmlFor?: string;
+  required?: boolean;
+  description?: string;
+  error?: string;
+  hint?: string;
+  class?: string;
+  labelClass?: string;
+}
+const { label, htmlFor, required, description, error, hint, class: cls = "", labelClass = "" } = Astro.props;
+---
+<div class={`space-y-1.5 ${cls}`}>
+  <label for={htmlFor} class={`block text-sm font-medium leading-tight ${labelClass ?? ""}`}>
+    {label}
+    {required && <span class="ml-0.5 text-destructive" aria-hidden="true">*</span>}
+    {description && <span class="ml-2 text-xs font-normal text-muted-foreground">{description}</span>}
+  </label>
+  <slot />
+  {error ? (
+    <p class="text-xs font-medium text-destructive" role="alert">{error}</p>
+  ) : hint ? (
+    <p class="text-xs text-muted-foreground">{hint}</p>
+  ) : null}
+</div>

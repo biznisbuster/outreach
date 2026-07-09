@@ -1,0 +1,10 @@
+# Lokalni dev / self-signed TLS. Za produkciju na pravom domenu
+# zameni :80/:443 blok sa: outreach.tvojdomen.rs { ... } (auto Let's Encrypt).
+:80, :443 {
+	tls internal
+
+	encode zstd gzip
+
+	# API za unsubscribe ne zahteva auth, ide kroz web
+	reverse_proxy web:3000
+}

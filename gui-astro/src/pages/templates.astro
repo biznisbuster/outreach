@@ -1,0 +1,104 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import { getDb, schema } from "../lib/db";
+import { asc, eq } from "drizzle-orm";
+
+const db = getDb();
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const op = form.get("op");
+  if (op === "create") {
+    db.insert(schema.promptTemplates).values({
+      name: String(form.get("name")),
+      type: "manual",
+      body: String(form.get("body")),
+      isDefault: false,
+    }).run();
+    return Astro.redirect("/templates?ok=Kreiran", 303);
+  }
+  if (op === "update") {
+    const id = Number(form.get("id"));
+    db.update(schema.promptTemplates).set({
+      name: String(form.get("name")),
+      body: String(form.get("body")),
+      updatedAt: new Date(),
+    }).where(eq(schema.promptTemplates.id, id)).run();
+    return Astro.redirect(`/templates?ok=${encodeURIComponent("Ažuriran #" + id)}`, 303);
+  }
+  if (op === "delete") {
+    const id = Number(form.get("id"));
+    db.delete(schema.promptTemplates).where(eq(schema.promptTemplates.id, id)).run();
+    return Astro.redirect("/templates?ok=Obrisan", 303);
+  }
+}
+
+const items = db.select().from(schema.promptTemplates).orderBy(asc(schema.promptTemplates.id)).all();
+---
+<AppLayout title="Šabloni — Outreach">
+  <div>
+    <div class="border-b px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Šabloni</h1>
+      <p class="text-sm text-muted-foreground">Tekstualni šabloni za ručno pisanje emailova. AI generisanje je uklonjeno u v2.</p>
+    </div>
+
+    <div class="space-y-6 p-6">
+      {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
+      {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <Card class="max-w-3xl">
+        <CardHeader>
+          <CardTitle class="text-base">+ Novi šablon</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form method="POST" class="space-y-3">
+            <input type="hidden" name="op" value="create" />
+            <input name="name" required placeholder="Naziv šablona" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
+            <textarea name="body" required rows="6" placeholder="Telo šablona (subject + tekst)… možeš koristiti {{firstName}}, {{companyName}} kao placeholder-e." class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"></textarea>
+            <div class="flex justify-end">
+              <button class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Dodaj</button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        {items.length === 0 ? (
+          <Card class="lg:col-span-2">
+            <CardContent class="py-12 text-center text-muted-foreground">
+              Nema šablona. Dodaj prvi iznad.
+            </CardContent>
+          </Card>
+        ) : items.map((t) => (
+          <Card>
+            <CardContent class="pt-6">
+              <form method="POST" class="space-y-2">
+                <input type="hidden" name="op" value="update" />
+                <input type="hidden" name="id" value={String(t.id)} />
+                <input name="name" value={t.name} required class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-medium" />
+                <textarea name="body" required rows="6" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs">{t.body}</textarea>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-muted-foreground">id={t.id} · {t.isDefault ? "default" : "custom"}</span>
+                  <div class="flex gap-2">
+                    <button class="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">Sačuvaj</button>
+                </div>
+                </div>
+              </form>
+              <form method="POST" class="mt-2 text-right">
+                <input type="hidden" name="op" value="delete" />
+                <input type="hidden" name="id" value={String(t.id)} />
+                <button class="text-xs text-red-600 hover:underline">Obriši</button>
+              </form>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  </div>
+</AppLayout>

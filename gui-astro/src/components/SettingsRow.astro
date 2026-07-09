@@ -1,0 +1,136 @@
+---
+/**
+ * SettingsRow — jedan red u settings stranici.
+ *
+ * Prikazuje: label, source chip (db/env/default), description, env hint,
+ * input (po tipu), i Reset dugme ako je source === "db".
+ *
+ * Izdvojeno kao komponenta jer settings.astro ima dosta nesting-a i
+ * `{#each X as s} + {#if/else}` unutar <CardContent> pravi TypeScript
+ * parsing probleme u Astro compiler-u.
+ */
+import type { SettingView } from "../lib/settings";
+
+interface Props {
+  s: SettingView;
+}
+const { s } = Astro.props;
+
+// Source chip klasa (boje)
+const chipClass =
+  s.source === "db"
+    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+    : s.source === "env"
+      ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300"
+      : "bg-muted text-muted-foreground";
+
+const showUnit = s.def.unit && (s.def.type === "number" || s.def.type === "select");
+const isChecked = s.value === "1" || s.value.toLowerCase() === "true";
+---
+<div class="grid grid-cols-1 gap-2 border-t pt-3 first:border-t-0 first:pt-0 sm:grid-cols-[1fr_2fr] sm:gap-4">
+  <!-- Meta kolona -->
+  <div class="space-y-1">
+    <div class="flex flex-wrap items-center gap-2">
+      <label for={s.key} class="text-sm font-medium">{s.def.label}</label>
+      <span class:list={["rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider", chipClass]}>
+        {s.source}
+      </span>
+      {showUnit ? <span class="text-[10px] text-muted-foreground">{s.def.unit}</span> : null}
+    </div>
+    {s.def.description ? <p class="text-xs text-muted-foreground">{s.def.description}</p> : null}
+    {s.def.envHint ? (
+      <p class="text-[11px] text-muted-foreground">
+        Env fallback: <code class="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">{s.def.envHint}</code>
+      </p>
+    ) : null}
+  </div>
+
+  <!-- Input kolona -->
+  <div class="flex items-start gap-2">
+    <div class="flex-1">
+      {s.def.type === "password" ? (
+        <div class="relative">
+          <input
+            id={s.key}
+            name={s.key}
+            type={s.isSecret && s.value ? "password" : "text"}
+            value={s.value}
+            placeholder={s.def.placeholder ?? ""}
+            class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 pr-9 text-sm"
+          />
+          <button
+            type="button"
+            class="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-muted-foreground hover:text-foreground"
+            data-toggle-reveal={s.key}
+            aria-label="Prikaži/sakrij"
+          >
+            <svg data-icon-hide width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg data-icon-show width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+      ) : s.def.type === "number" ? (
+        <input
+          id={s.key}
+          name={s.key}
+          type="number"
+          value={s.value}
+          min={s.def.min}
+          max={s.def.max}
+          placeholder={s.def.placeholder ?? ""}
+          class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+        />
+      ) : s.def.type === "select" ? (
+        <select
+          id={s.key}
+          name={s.key}
+          class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+        >
+          {(s.def.options ?? []).map((o) => (
+            <option value={o} selected={s.value === o}>{o === "0" ? "Isključeno" : o === "1" ? "Uključeno" : o}</option>
+          ))}
+        </select>
+      ) : s.def.type === "boolean" ? (
+        <label class="inline-flex h-9 cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name={s.key}
+            value="1"
+            checked={isChecked}
+            data-boolean-toggle={s.key}
+            class="h-4 w-4 rounded border-input"
+          />
+          <span class="text-muted-foreground" data-boolean-label={s.key}>
+            {isChecked ? "Uključeno" : "Isključeno"}
+          </span>
+        </label>
+      ) : (
+        <input
+          id={s.key}
+          name={s.key}
+          type="text"
+          value={s.value}
+          placeholder={s.def.placeholder ?? ""}
+          class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+        />
+      )}
+    </div>
+
+    {s.source === "db" ? (
+      <button
+        type="submit"
+        formaction="/settings"
+        formmethod="POST"
+        name="op"
+        value="reset"
+        class="inline-flex h-9 shrink-0 items-center rounded-md border border-input bg-transparent px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+        title="Resetuj na env/default"
+      >
+        Reset
+      </button>
+    ) : null}
+  </div>
+</div>

@@ -1,0 +1,42 @@
+---
+/**
+ * Avatar — colored initials circle with deterministic hash-based color.
+ *
+ * <Avatar name="Cvećara Niš" />         → initials "CN", colored chip
+ * <Avatar name="Ana K." size={48} />    → larger, overrides default 40
+ */
+import { getInitials } from "~/lib/utils";
+
+interface Props {
+  name?: string | null;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 40, class: cls = "" } = Astro.props;
+
+const PALETTE = [
+  { bg: "bg-indigo-100 dark:bg-indigo-950", fg: "text-indigo-700 dark:text-indigo-300" },
+  { bg: "bg-blue-100 dark:bg-blue-950", fg: "text-blue-700 dark:text-blue-300" },
+  { bg: "bg-violet-100 dark:bg-violet-950", fg: "text-violet-700 dark:text-violet-300" },
+  { bg: "bg-emerald-100 dark:bg-emerald-950", fg: "text-emerald-700 dark:text-emerald-300" },
+  { bg: "bg-amber-100 dark:bg-amber-950", fg: "text-amber-700 dark:text-amber-300" },
+  { bg: "bg-rose-100 dark:bg-rose-950", fg: "text-rose-700 dark:text-rose-300" },
+  { bg: "bg-teal-100 dark:bg-teal-950", fg: "text-teal-700 dark:text-teal-300" },
+  { bg: "bg-pink-100 dark:bg-pink-950", fg: "text-pink-700 dark:text-pink-300" },
+];
+
+const initials = getInitials(name);
+// Deterministic palette index from the name's char codes
+const hash = (name || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+const palette = PALETTE[hash % PALETTE.length];
+
+const fontSize = size <= 28 ? "text-[10px]" : size <= 36 ? "text-xs" : size <= 48 ? "text-sm" : "text-base";
+---
+<div
+  class={`flex shrink-0 items-center justify-center rounded-full font-semibold uppercase ${palette.bg} ${palette.fg} ${fontSize} ${cls}`}
+  style={`width:${size}px;height:${size}px`}
+  aria-hidden="true"
+>
+  {initials}
+</div>

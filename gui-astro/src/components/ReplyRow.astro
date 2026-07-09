@@ -1,0 +1,88 @@
+---
+/**
+ * ReplyRow — jedan reply u inbox grupi.
+ *
+ * <ReplyRow reply={r} />
+ * <ReplyRow reply={r} compact />     ← stariji reply u collapsible sekciji
+ */
+import { formatDate, timeAgo } from "~/lib/utils";
+
+interface Props {
+  reply: {
+    id: number;
+    leadId: number;
+    fromEmail: string;
+    subject: string | null;
+    body: string | null;
+    receivedAt: Date | number | string | null;
+    matchedBy?: string | null;
+  };
+  compact?: boolean;
+}
+
+const { reply, compact = false } = Astro.props;
+const receivedIso = reply.receivedAt
+  ? new Date(reply.receivedAt).toISOString()
+  : "";
+---
+<div
+  class:list={[
+    "px-4 py-3 transition-colors",
+    compact ? "bg-muted/10" : "bg-card",
+  ]}
+>
+  <div class="flex items-start justify-between gap-3">
+    <div class="min-w-0 flex-1">
+      <div class="truncate text-sm font-medium text-foreground">
+        {reply.subject || (
+          <span class="text-muted-foreground italic">(bez subject-a)</span>
+        )}
+      </div>
+      <div class="mt-0.5 flex items-center gap-2 truncate text-xs text-muted-foreground">
+        <span>Od</span>
+        <span class="font-mono">{reply.fromEmail}</span>
+        {reply.matchedBy && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span class="rounded bg-muted px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+              {reply.matchedBy}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+    <time
+      datetime={receivedIso}
+      title={formatDate(reply.receivedAt)}
+      class="shrink-0 text-right text-xs text-muted-foreground tabular-nums"
+    >
+      <div>{formatDate(reply.receivedAt)}</div>
+      <div class="text-[10px] opacity-70">({timeAgo(reply.receivedAt)})</div>
+    </time>
+  </div>
+
+  {reply.body ? (
+    <details class="mt-2 group/body">
+      <summary class="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="transition-transform group-open/body:rotate-90"
+          aria-hidden="true"
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+        Prikaži telo
+      </summary>
+      <pre class="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-3 font-sans text-xs leading-relaxed text-foreground">{reply.body}</pre>
+    </details>
+  ) : (
+    <p class="mt-1 text-xs italic text-muted-foreground">Bez teksta.</p>
+  )}
+</div>

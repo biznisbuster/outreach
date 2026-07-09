@@ -1,0 +1,460 @@
+---
+/**
+ * ImportDialog — multi-step CSV/JSON import modal.
+ *
+ * Flow:
+ *   Step 1: choose file or paste text
+ *   Step 2: preview (calls POST /api/import)
+ *   Step 3: pick campaign + commit (calls POST /api/import/commit)
+ *
+ * <ImportDialog campaigns={campaigns} triggerId="import-trigger" />
+ *
+ * The trigger button can come from anywhere in the page (default button if no
+ * element with id="import-trigger" exists in the slot). Modal mounts a
+ * <dialog> and listens for its trigger button click.
+ */
+import Icon from "./Icon.astro";
+import Button from "./Button.astro";
+import type { IconName } from "~/lib/icons";
+
+interface CampaignLite {
+  id: number;
+  name: string;
+}
+
+interface Props {
+  campaigns: CampaignLite[];
+  class?: string;
+}
+
+const { campaigns, class: cls = "" } = Astro.props;
+---
+<!-- Default trigger (only used if the page doesn't supply one with id="import-trigger") -->
+{Astro.slots.has("trigger") ? (
+  <slot name="trigger" />
+) : (
+  <Button id="import-trigger" variant="primary" icon="upload">Import</Button>
+)}
+
+<dialog
+  id="import-dialog"
+  class={`modal-dialog overflow-visible border-0 bg-transparent p-0 backdrop:bg-black/50 backdrop:backdrop-blur-sm ${cls}`}
+  style="--modal-max-w: 720px"
+>
+  <div class="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+    <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+      <div>
+        <h2 class="text-lg font-bold tracking-tight">Import leadova</h2>
+        <p class="mt-0.5 text-sm text-muted-foreground">CSV ili JSON — pregled pre ubacivanja</p>
+      </div>
+      <button
+        type="button"
+        data-import-close
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label="Zatvori"
+      >
+        <Icon name="x" size={16} />
+      </button>
+    </header>
+
+    <div class="flex-1 overflow-y-auto px-5 py-4">
+      <!-- error banner -->
+      <div
+        id="import-error"
+        class="mb-4 hidden rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive"
+        role="alert"
+      ></div>
+
+      <!-- STEP 1: source -->
+      <section data-step="1">
+        <div class="mb-3 flex items-center gap-2 text-sm font-medium">
+          <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">1</span>
+          Izaberi izvor
+        </div>
+        <div class="space-y-3 rounded-lg border border-dashed border-border bg-muted/30 p-4">
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">CSV fajl</label>
+            <input
+              id="import-file"
+              type="file"
+              accept=".csv,.json,text/csv"
+              class="block w-full cursor-pointer rounded-md border border-input bg-background px-3 py-1.5 text-sm file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-sm file:font-medium file:text-primary-foreground hover:border-primary/50"
+            />
+          </div>
+          <div class="relative flex items-center gap-3 text-xs text-muted-foreground">
+            <span class="h-px flex-1 bg-border"></span>
+            <span>ili</span>
+            <span class="h-px flex-1 bg-border"></span>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">Nalepi tekst (CSV / JSON)</label>
+            <textarea
+              id="import-text"
+              rows="5"
+              placeholder={"naziv,email,website,grad,kategorija,telefon,..."}
+              class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+            ></textarea>
+          </div>
+          <button
+            type="button"
+            id="import-preview-btn"
+            class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+          >
+            Pregledaj
+          </button>
+        </div>
+      </section>
+
+      <!-- STEP 2: preview -->
+      <section data-step="2" class="hidden mt-4">
+        <div class="mb-3 flex items-center gap-2 text-sm font-medium">
+          <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">2</span>
+          Pregled (<span id="import-total">0</span> redova)
+        </div>
+
+        <div class="mb-3 grid grid-cols-4 gap-2 text-center text-sm">
+          <div class="rounded-md border border-success/30 bg-success-soft px-3 py-2">
+            <div class="text-xs font-medium text-success">Novih</div>
+            <div class="text-lg font-bold text-success tabular-nums" id="import-new-count">0</div>
+          </div>
+          <div class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2">
+            <div class="text-xs font-medium text-warning">Duplikata</div>
+            <div class="text-lg font-bold text-warning tabular-nums" id="import-dup-count">0</div>
+          </div>
+          <div class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2">
+            <div class="text-xs font-medium text-destructive">Neispravnih</div>
+            <div class="text-lg font-bold text-destructive tabular-nums" id="import-invalid-count">0</div>
+          </div>
+          <div class="rounded-md border border-border bg-muted px-3 py-2">
+            <div class="text-xs font-medium text-muted-foreground">Ukupno</div>
+            <div class="text-lg font-bold tabular-nums" id="import-total-count">0</div>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-border">
+          <table class="w-full text-sm">
+            <thead class="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th class="px-3 py-2 font-medium">Naziv</th>
+                <th class="px-3 py-2 font-medium">Grad</th>
+                <th class="px-3 py-2 font-medium">Email</th>
+                <th class="px-3 py-2 font-medium">Web</th>
+                <th class="px-3 py-2 font-medium">Tel</th>
+              </tr>
+            </thead>
+            <tbody id="import-preview-tbody" class="divide-y divide-border"></tbody>
+          </table>
+        </div>
+
+        <div
+          id="import-invalid-wrap"
+          class="mt-3 hidden rounded-md border border-destructive/30 bg-destructive-soft/40 px-3 py-2 text-xs text-destructive"
+        >
+          <details>
+            <summary class="cursor-pointer font-medium">
+              <span id="import-invalid-summary">0 neispravnih redova (prikaži)</span>
+            </summary>
+            <ul id="import-invalid-list" class="mt-2 space-y-0.5 pl-4"></ul>
+          </details>
+        </div>
+      </section>
+
+      <!-- STEP 3: pick campaign + commit -->
+      <section data-step="3" class="hidden mt-4">
+        <div class="mb-3 flex items-center gap-2 text-sm font-medium">
+          <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">3</span>
+          Kampanja + uvoz
+        </div>
+        <div class="rounded-lg border border-border bg-muted/30 p-4">
+          <label class="mb-1.5 block text-sm font-medium">Kampanja</label>
+          <select
+            id="import-campaign-select"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-primary"
+          >
+            {campaigns.length === 0 ? (
+              <option value="">Nema kampanja — kreiraj prvo jednu</option>
+            ) : (
+              <>
+                <option value="">Odaberi kampanju…</option>
+                {campaigns.map((c) => (
+                  <option value={String(c.id)}>{c.name}</option>
+                ))}
+              </>
+            )}
+          </select>
+          <p class="mt-2 text-xs text-muted-foreground">
+            Leadovi će biti označeni statusom <strong>Novi</strong> i upisani pod izabranom kampanjom.
+            Duplikati (po dedup ključu) će biti preskočeni.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <footer class="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-5 py-3">
+      <button
+        type="button"
+        id="import-back"
+        class="hidden h-9 items-center rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+      >
+        ← Nazad
+      </button>
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          data-import-close
+          class="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent"
+        >
+          Otkaži
+        </button>
+        <button
+          type="button"
+          id="import-next"
+          class="hidden h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+        >
+          Dalje →
+        </button>
+        <button
+          type="button"
+          id="import-commit"
+          class="hidden h-9 items-center rounded-md bg-success px-4 text-sm font-medium text-success-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985]"
+        >
+          Ubaci <span id="import-commit-count">0</span> leadova
+        </button>
+      </div>
+    </footer>
+  </div>
+</dialog>
+
+<script is:inline>
+  (function () {
+    var dlg = document.getElementById("import-dialog");
+    var trig = document.getElementById("import-trigger");
+    if (!dlg) return;
+
+    var fileInput = dlg.querySelector("#import-file");
+    var textInput = dlg.querySelector("#import-text");
+    var previewBtn = dlg.querySelector("#import-preview-btn");
+    var backBtn = dlg.querySelector("#import-back");
+    var nextBtn = dlg.querySelector("#import-next");
+    var commitBtn = dlg.querySelector("#import-commit");
+    var errorEl = dlg.querySelector("#import-error");
+    var campaignSel = dlg.querySelector("#import-campaign-select");
+    var previewTbody = dlg.querySelector("#import-preview-tbody");
+    var invalidWrap = dlg.querySelector("#import-invalid-wrap");
+    var invalidList = dlg.querySelector("#import-invalid-list");
+
+    var STATE = { step: 1, preview: null, loading: false };
+
+    function showError(msg) {
+      if (!msg) { errorEl.classList.add("hidden"); errorEl.textContent = ""; return; }
+      errorEl.textContent = msg;
+      errorEl.classList.remove("hidden");
+    }
+    function setStep(n) {
+      STATE.step = n;
+      dlg.querySelectorAll("[data-step]").forEach(function (s) {
+        s.classList.toggle("hidden", Number(s.getAttribute("data-step")) !== n);
+      });
+      backBtn.classList.toggle("hidden", n === 1);
+      nextBtn.classList.toggle("hidden", n === 3);
+      commitBtn.classList.toggle("hidden", n !== 3);
+      if (n === 3) {
+        var nCount = STATE.preview ? STATE.preview.newCount : 0;
+        var cn = dlg.querySelector("#import-commit-count");
+        if (cn) cn.textContent = String(nCount);
+      }
+    }
+    function open() {
+      showError(null);
+      STATE = { step: 1, preview: null, loading: false };
+      if (fileInput) fileInput.value = "";
+      if (textInput) textInput.value = "";
+      previewTbody.innerHTML = "";
+      invalidList.innerHTML = "";
+      invalidWrap.classList.add("hidden");
+      campaignSel.value = "";
+      setStep(1);
+      try { dlg.showModal(); } catch (e) { console.error(e); }
+      setTimeout(function () {
+        var first = dlg.querySelector("input, textarea, select");
+        if (first) first.focus();
+      }, 30);
+    }
+    function close() { if (dlg.open) dlg.close(); }
+
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    async function runPreview() {
+      if (STATE.loading) return;
+      showError(null);
+      STATE.loading = true;
+      previewBtn.disabled = true;
+      previewBtn.textContent = "Parsiram…";
+
+      try {
+        var text = textInput.value || "";
+        var fd = null;
+        var useMultipart = false;
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+          fd = new FormData();
+          fd.append("file", fileInput.files[0]);
+          useMultipart = true;
+        } else if (text.trim()) {
+          fd = null; // send as text body
+        } else {
+          showError("Izaberi CSV fajl ili nalepi tekst.");
+          return;
+        }
+
+        var r;
+        if (useMultipart) {
+          r = await fetch("/api/import", { method: "POST", body: fd });
+        } else {
+          r = await fetch("/api/import", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+            body: text,
+          });
+        }
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          showError(d && d.error ? d.error : ("HTTP " + r.status));
+          return;
+        }
+        STATE.preview = d;
+        renderPreview(d);
+        setStep(2);
+      } catch (err) {
+        showError(err && err.message ? err.message : "Greška.");
+      } finally {
+        STATE.loading = false;
+        previewBtn.disabled = false;
+        previewBtn.textContent = "Pregledaj";
+      }
+    }
+
+    function renderPreview(d) {
+      dlg.querySelector("#import-total").textContent = String(d.total);
+      dlg.querySelector("#import-new-count").textContent = String(d.newCount);
+      dlg.querySelector("#import-dup-count").textContent = String(d.duplicateCount);
+      dlg.querySelector("#import-invalid-count").textContent = String(d.invalidCount);
+      dlg.querySelector("#import-total-count").textContent = String(d.total);
+
+      var rows = (d.newRows || []).slice(0, 50);
+      previewTbody.innerHTML = rows.length
+        ? rows.map(function (r) {
+            return "<tr>" +
+              "<td class='px-3 py-2'>" + escapeHtml(r.name) + "</td>" +
+              "<td class='px-3 py-2 text-muted-foreground'>" + escapeHtml(r.city) + "</td>" +
+              "<td class='px-3 py-2 text-muted-foreground'>" + escapeHtml(r.email || "—") + "</td>" +
+              "<td class='px-3 py-2 text-muted-foreground'>" + escapeHtml(r.websiteNormalized || "—") + "</td>" +
+              "<td class='px-3 py-2 text-muted-foreground'>" + escapeHtml(r.phoneE164 || "—") + "</td>" +
+              "</tr>";
+          }).join("")
+        : "<tr><td colspan='5' class='px-3 py-6 text-center text-sm text-muted-foreground'>Nema novih redova za uvoz.</td></tr>";
+
+      if (d.newRows && d.newRows.length > 50) {
+        previewTbody.insertAdjacentHTML("beforeend",
+          "<tr><td colspan='5' class='px-3 py-2 text-center text-xs text-muted-foreground'>… i još " + (d.newRows.length - 50) + " redova.</td></tr>");
+      }
+
+      var invalid = d.invalidRows || [];
+      if (invalid.length) {
+        invalidWrap.classList.remove("hidden");
+        dlg.querySelector("#import-invalid-summary").textContent = invalid.length + " neispravnih redova (prikaži)";
+        invalidList.innerHTML = invalid.slice(0, 50).map(function (row) {
+          return "<li>Red " + (row.index + 1) + " '" + escapeHtml(row.name || "—") + "' — " + escapeHtml((row.errors || []).join(", ")) + "</li>";
+        }).join("");
+      } else {
+        invalidWrap.classList.add("hidden");
+      }
+    }
+
+    async function runCommit() {
+      if (!STATE.preview || STATE.preview.newCount === 0) {
+        showError("Nema novih leadova za uvoz.");
+        return;
+      }
+      var cid = campaignSel.value;
+      if (!cid) {
+        showError("Izaberi kampanju.");
+        return;
+      }
+      if (STATE.loading) return;
+      STATE.loading = true;
+      showError(null);
+      commitBtn.disabled = true;
+      commitBtn.textContent = "Uvozim…";
+      try {
+        var leads = STATE.preview.newRows.map(function (r) {
+          return {
+            name: r.name,
+            category: r.category || null,
+            phoneRaw: r.phoneRaw || null,
+            phoneE164: r.phoneE164 || null,
+            email: r.email || null,
+            websiteRaw: r.websiteRaw || null,
+            websiteNormalized: r.websiteNormalized || null,
+            address: r.address || null,
+            city: r.city || null,
+            postalCode: r.postalCode || null,
+            googleRating: r.googleRating || null,
+            reviewsCount: r.reviewsCount || null,
+            source: r.source || null,
+            sourceUrl: r.sourceUrl || null,
+            dedup: r.dedup,
+          };
+        });
+        var r = await fetch("/api/import/commit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId: Number(cid), leads: leads }),
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          showError(d && d.error ? d.error : ("HTTP " + r.status));
+          return;
+        }
+        // Success — flash toast and reload
+        if (typeof window.flash === "function") {
+          window.flash(
+            "Ubačeno " + (d.inserted || 0) + ", preskočeno " + (d.skipped || 0) +
+              (d.batchId ? " · batch " + d.batchId.slice(0, 8) : ""),
+            "success"
+          );
+        }
+        close();
+        setTimeout(function () { window.location.reload(); }, 300);
+      } catch (err) {
+        showError(err && err.message ? err.message : "Greška pri uvozu.");
+      } finally {
+        STATE.loading = false;
+        commitBtn.disabled = false;
+        commitBtn.textContent = "Ubaci";
+      }
+    }
+
+    if (trig) trig.addEventListener("click", function (e) { e.preventDefault(); open(); });
+    dlg.querySelectorAll("[data-import-close]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.preventDefault(); close(); });
+    });
+    dlg.addEventListener("click", function (e) { if (e.target === dlg) close(); });
+
+    previewBtn.addEventListener("click", runPreview);
+    nextBtn.addEventListener("click", function () {
+      if (STATE.step === 2) {
+        if (!STATE.preview) { showError("Prvo pokreni pregled."); return; }
+        if (STATE.preview.newCount === 0) { showError("Nema novih leadova za uvoz."); return; }
+        setStep(3);
+      }
+    });
+    backBtn.addEventListener("click", function () {
+      if (STATE.step > 1) setStep(STATE.step - 1);
+    });
+    commitBtn.addEventListener("click", runCommit);
+  })();
+</script>

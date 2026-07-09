@@ -1,0 +1,142 @@
+---
+/**
+ * Toaster — global transient notification system.
+ *
+ * Mounts a <div id="toaster"> in the corner of the screen.
+ * Exposes window.flash(message, kind) via inline script.
+ *
+ * Usage (from any page script):
+ *   flash("Sačuvano!", "success");
+ *   flash("Greška pri čuvanju", "error");
+ *   flash("Info poruka", "info");
+ *
+ * Optional URL-query integration (in AppLayout):
+ *   <script is:inline>
+ *     (function() {
+ *       const ok = new URLSearchParams(location.search).get("ok");
+ *       const err = new URLSearchParams(location.search).get("error");
+ *       if (ok) { flash(decodeURIComponent(ok), "success"); history.replaceState({}, "", location.pathname + location.hash); }
+ *       if (err) { flash(decodeURIComponent(err), "error"); }
+ *     })();
+ *   </script>
+ */
+import Icon from "./Icon.astro";
+import type { IconName } from "~/lib/icons";
+
+type Kind = "success" | "error" | "warning" | "info";
+
+const META: Record<Kind, { icon: IconName; bar: string }> = {
+  success: { icon: "check-circle", bar: "bg-success" },
+  error: { icon: "alert-triangle", bar: "bg-destructive" },
+  warning: { icon: "alert-triangle", bar: "bg-warning" },
+  info: { icon: "info", bar: "bg-info" },
+};
+---
+<div
+  id="toaster"
+  aria-live="polite"
+  aria-atomic="false"
+  class="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2 sm:right-6 sm:top-6"
+>
+</div>
+
+<template id="toast-template">
+  <div
+    role="status"
+    class="toast pointer-events-auto relative flex w-full items-start gap-2 overflow-hidden rounded-lg border border-border bg-card p-3 pl-4 text-sm shadow-lg ring-1 ring-black/5 dark:ring-white/5 translate-x-4 opacity-0 transition-all duration-200 ease-out"
+  >
+    <div class="absolute inset-y-0 left-0 w-1 toast-bar"></div>
+    <span class="toast-icon mt-0.5 shrink-0">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d=""/>
+      </svg>
+    </span>
+    <span class="toast-message flex-1 break-words text-foreground"></span>
+    <button type="button" class="toast-close shrink-0 rounded p-0.5 text-muted-foreground opacity-70 transition-opacity hover:opacity-100" aria-label="Zatvori">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+      </svg>
+    </button>
+  </div>
+</template>
+
+<script is:inline>
+  (function () {
+    var container = document.getElementById("toaster");
+    var template = document.getElementById("toast-template");
+    if (!container || !template) return;
+
+    var ICONS = {
+      success: '<polyline points="20 6 9 17 4 12"/>',
+      error: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/>',
+      warning: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/>',
+      info: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/>',
+    };
+    var KIND_CLASS = {
+      success: { icon: 'text-success', bar: 'bg-success' },
+      error:   { icon: 'text-destructive', bar: 'bg-destructive' },
+      warning: { icon: 'text-warning', bar: 'bg-warning' },
+      info:    { icon: 'text-info', bar: 'bg-info' },
+    };
+
+    function flash(message, kind, ms) {
+      if (kind === undefined) kind = "info";
+      if (ms === undefined) ms = 4500;
+      if (kind === "error") ms = Math.max(ms, 6000);
+      var node = template.content.firstElementChild.cloneNode(true);
+      node.classList.add("toast-" + kind);
+      var klass = KIND_CLASS[kind] || KIND_CLASS.info;
+      node.querySelector(".toast-bar").classList.add(klass.bar);
+      var icon = node.querySelector(".toast-icon");
+      icon.classList.add(klass.icon);
+      icon.querySelector("svg").innerHTML = ICONS[kind] || ICONS.info;
+      node.querySelector(".toast-message").textContent = String(message || "");
+      var closeBtn = node.querySelector(".toast-close");
+      function dismiss() {
+        if (!node.parentNode) return;
+        node.classList.add("translate-x-4", "opacity-0");
+        setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 200);
+      }
+      closeBtn.addEventListener("click", dismiss);
+      container.appendChild(node);
+      // animate in next frame
+      requestAnimationFrame(function () {
+        node.classList.remove("translate-x-4", "opacity-0");
+      });
+      // auto-dismiss
+      if (ms > 0) setTimeout(dismiss, ms);
+      return dismiss;
+    }
+
+    // Auto-pick up ?ok= / ?error= from URL once after page load
+    function tryFlashFromUrl() {
+      var url = new URL(window.location.href);
+      var ok = url.searchParams.get("ok");
+      var err = url.searchParams.get("error");
+      var changed = false;
+      if (ok) {
+        try { flash(decodeURIComponent(ok), "success", 3000); } catch (e) { flash(ok, "success", 3000); }
+        url.searchParams.delete("ok");
+        changed = true;
+      }
+      if (err) {
+        try { flash(decodeURIComponent(err), "error"); } catch (e) { flash(err, "error"); }
+        url.searchParams.delete("error");
+        changed = true;
+      }
+      if (changed) {
+        var qs = url.searchParams.toString();
+        var newUrl = url.pathname + (qs ? "?" + qs : "") + url.hash;
+        window.history.replaceState({}, "", newUrl);
+      }
+    }
+
+    window.flash = flash;
+    // Run after current event loop tick so override-on-init scripts (AppLayout) win
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () { setTimeout(tryFlashFromUrl, 0); });
+    } else {
+      setTimeout(tryFlashFromUrl, 0);
+    }
+  })();
+</script>

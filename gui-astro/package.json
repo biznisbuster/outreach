@@ -1,0 +1,43 @@
+{
+  "name": "outreach-gui-astro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 0.0.0.0",
+    "build": "astro build",
+    "start": "HOST=0.0.0.0 PORT=${PORT:-3000} node ./dist/server/entry.mjs",
+    "preview": "astro preview",
+    "typecheck": "astro check",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.0.2",
+    "@tailwindcss/vite": "^4.0.0",
+    "astro": "^7.0.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.0.0",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.38.3",
+    "imapflow": "^1.0.171",
+    "nodemailer": "^7.0.7",
+    "tailwind-merge": "^3.0.0",
+    "tailwindcss": "^4.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^20.17.10",
+    "@types/nodemailer": "^6.4.17",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

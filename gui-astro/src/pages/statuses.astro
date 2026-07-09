@@ -1,0 +1,276 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import CardDescription from "../components/CardDescription.astro";
+import Banner from "../components/Banner.astro";
+import Button from "../components/Button.astro";
+import StatusBadge from "../components/StatusBadge.astro";
+import EmptyState from "../components/EmptyState.astro";
+import Table from "../components/Table.astro";
+import Input from "../components/Input.astro";
+import Field from "../components/Field.astro";
+import { getDb, schema } from "../lib/db";
+import { asc, eq, count } from "drizzle-orm";
+
+const db = getDb();
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const op = form.get("op");
+  const id = Number(form.get("id"));
+  if (op === "delete") {
+    const used = db
+      .select({ n: count() })
+      .from(schema.leads)
+      .where(eq(schema.leads.statusId, id))
+      .all();
+    const usedCount = Number(used[0]?.n ?? 0);
+    if (usedCount > 0) {
+      return Astro.redirect(
+        `/statuses?error=${encodeURIComponent(`Status koristi ${usedCount} leadova — ne može se obrisati`)}`,
+        303,
+      );
+    }
+    db.delete(schema.statuses).where(eq(schema.statuses.id, id)).run();
+    return Astro.redirect(`/statuses?ok=${encodeURIComponent("Status obrisan")}`, 303);
+  }
+}
+
+const items = db
+  .select({
+    status: schema.statuses,
+    used: count(schema.leads.id),
+  })
+  .from(schema.statuses)
+  .leftJoin(schema.leads, eq(schema.leads.id, schema.statuses.statusId))
+  .groupBy(schema.statuses.id)
+  .orderBy(asc(schema.statuses.sortOrder))
+  .all();
+---
+<AppLayout title="Statusi — Outreach">
+  <div>
+    <div class="border-b border-border bg-card px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Statusi</h1>
+      <p class="text-sm text-muted-foreground">
+        Upravljanje pipeline statusima. Koristi se u leadima, sekvencama, dashboardu.
+      </p>
+    </div>
+
+    <div class="space-y-6 p-6">
+      {ok && <Banner kind="success" message={ok} dismissible />}
+      {error && <Banner kind="error" message={error} dismissible />}
+
+      <!-- Novi status (AJAX inline form) -->
+      <Card class="max-w-2xl">
+        <CardHeader>
+          <CardTitle class="text-base">Novi status</CardTitle>
+          <CardDescription>
+            Kreiraj novi status. Biće dostupan u dropdown-ima svuda.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form id="new-status-form" class="space-y-3" data-returnto="/statuses">
+            <Field label="Naziv" hint="max 40 karaktera">
+              <Input
+                name="name"
+                required
+                maxlength="40"
+                placeholder="Npr. Follow-up"
+              />
+            </Field>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <Field label="Boja">
+                <div class="flex items-center gap-2">
+                  <input
+                    name="color"
+                    type="color"
+                    value="#3b82f6"
+                    required
+                    class="h-9 w-12 cursor-pointer rounded-md border border-input bg-background p-1"
+                    aria-label="Izaberi boju"
+                  />
+                  <span class="text-xs text-muted-foreground">
+                    Koristi se za badge u tabelama i pipeline vizualizacijama
+                  </span>
+                </div>
+              </Field>
+            </div>
+
+            <Field label="Tip statusa">
+              <div class="flex flex-wrap items-center gap-4 text-sm">
+                <label class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="isTerminalWon"
+                    class="h-4 w-4 rounded border-input text-primary focus:ring-ring"
+                  />
+                  <span>Won (završen uspešno)</span>
+                </label>
+                <label class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="isTerminalLost"
+                    class="h-4 w-4 rounded border-input text-primary focus:ring-ring"
+                  />
+                  <span>Lost (završen neuspešno)</span>
+                </label>
+              </div>
+            </Field>
+
+            <div id="new-status-msg" class="hidden text-sm"></div>
+
+            <div class="flex justify-end">
+              <Button type="submit" variant="primary">Sačuvaj</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <!-- Lista statusa -->
+      <Card>
+        <CardHeader>
+          <div class="flex items-baseline justify-between gap-2">
+            <CardTitle class="text-base">Statusi</CardTitle>
+            <span class="text-xs text-muted-foreground">{items.length} ukupno</span>
+          </div>
+        </CardHeader>
+        <CardContent class="p-0">
+          {items.length === 0 ? (
+            <EmptyState
+              icon="tag"
+              title="Nema statusa"
+              description="Kreiraj prvi status u formi iznad. Biće dostupan u dropdown-ima svuda."
+            />
+          ) : (
+            <Table hoverable>
+              <thead class="border-b border-border bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th class="px-4 py-2.5 font-semibold w-12">Boja</th>
+                  <th class="px-4 py-2.5 font-semibold">Naziv</th>
+                  <th class="px-4 py-2.5 font-semibold">Tip</th>
+                  <th class="px-4 py-2.5 font-semibold text-center">Sort</th>
+                  <th class="px-4 py-2.5 font-semibold text-center">Leadovi</th>
+                  <th class="px-4 py-2.5 font-semibold text-right">Akcije</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                {items.map((r) => {
+                  const s = r.status;
+                  return (
+                    <tr>
+                      <td class="px-4 py-2.5">
+                        <span
+                          class="block h-5 w-5 rounded-full ring-2 ring-background shadow-xs"
+                          style={`background:${s.color}`}
+                          aria-label={`Boja ${s.color}`}
+                        />
+                      </td>
+                      <td class="px-4 py-2.5">
+                        <div class="flex items-center gap-2">
+                          <StatusBadge
+                            name={s.name}
+                            color={s.color}
+                            isTerminalWon={s.isTerminalWon}
+                            isTerminalLost={s.isTerminalLost}
+                            size="md"
+                          />
+                          {s.systemDefault && (
+                            <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Sistemski
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2.5 text-xs text-muted-foreground">
+                        {s.isTerminalWon ? "Won ✓" : s.isTerminalLost ? "Lost ✗" : "Aktivan"}
+                      </td>
+                      <td class="px-4 py-2.5 text-center text-xs tabular-nums text-muted-foreground">
+                        {s.sortOrder}
+                      </td>
+                      <td class="px-4 py-2.5 text-center text-xs tabular-nums">
+                        {Number(r.used)}
+                      </td>
+                      <td class="px-4 py-2.5 text-right">
+                        {s.systemDefault ? (
+                          <span class="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <form
+                            method="POST"
+                            onsubmit={`return confirm('Obrisati status "${s.name}"?') || event.preventDefault()`}
+                            class="inline"
+                          >
+                            <input type="hidden" name="op" value="delete" />
+                            <input type="hidden" name="id" value={String(s.id)} />
+                            <button
+                              type="submit"
+                              class="text-xs font-medium text-destructive transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded-sm"
+                            >
+                              Obriši
+                            </button>
+                          </form>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</AppLayout>
+
+<!-- Inline JS za AJAX submit forme (NE DIRAJ: postojeći pattern) -->
+<script is:inline>
+  (function () {
+    var form = document.getElementById("new-status-form");
+    var msg = document.getElementById("new-status-msg");
+    if (!form) return;
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      var fd = new FormData(form);
+      var payload = {
+        name: fd.get("name"),
+        color: fd.get("color"),
+        isTerminalWon: !!fd.get("isTerminalWon"),
+        isTerminalLost: !!fd.get("isTerminalLost"),
+      };
+      var btn = form.querySelector("button[type=submit]");
+      btn.disabled = true;
+      btn.textContent = "Čuvam…";
+      try {
+        var r = await fetch("/api/statuses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Origin": location.origin },
+          body: JSON.stringify(payload),
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          msg.textContent = d.error || ("HTTP " + r.status);
+          msg.className = "text-sm text-destructive";
+          btn.disabled = false;
+          btn.textContent = "Sačuvaj";
+          return;
+        }
+        msg.textContent = "Sačuvano (#" + d.id + "). Osvežavam…";
+        msg.className = "text-sm text-success";
+        setTimeout(function () {
+          location.href = "/statuses?ok=" + encodeURIComponent("Kreiran status: " + d.name);
+        }, 400);
+      } catch (err) {
+        msg.textContent = err.message;
+        msg.className = "text-sm text-destructive";
+        btn.disabled = false;
+        btn.textContent = "Sačuvaj";
+      }
+    });
+  })();
+</script>

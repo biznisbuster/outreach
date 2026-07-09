@@ -1,0 +1,44 @@
+---
+/**
+ * Icon — Lucide-style SVG by name. No npm dep.
+ *
+ * <Icon name="search" size={16} />
+ * <Icon name="check-circle" class="text-success" />
+ */
+import type { IconName } from "~/lib/icons";
+import { ICONS } from "~/lib/icons";
+
+interface Props {
+  name: IconName;
+  size?: number;
+  class?: string;
+  strokeWidth?: number;
+  "aria-label"?: string;
+}
+
+const {
+  name,
+  size = 16,
+  class: cls = "",
+  strokeWidth = 2,
+  "aria-label": ariaLabel,
+} = Astro.props;
+
+const ariaProps = ariaLabel
+  ? { "aria-label": ariaLabel, role: "img" }
+  : { "aria-hidden": "true", focusable: "false" };
+---
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width={strokeWidth}
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  class={cls}
+  {...ariaProps}
+  set:html={ICONS[name]}
+/>

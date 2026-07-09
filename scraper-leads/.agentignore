@@ -1,0 +1,52 @@
+# Files AI agents should NOT load into context
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+credentials.*
+secrets.*
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.eggs/
+*.egg-info/
+dist/
+build/
+.uv-cache/
+.python-version
+
+# Playwright artifacts
+.playwright/
+.playwright-cache/
+test-results/
+playwright-report/
+
+# Browser state / checkpoints with potentially sensitive URLs
+.playwright-mcp/
+scrape_state.json
+cookies.json
+
+# Run output (could be large / contain PII)
+leads.csv
+leads.json
+leads.db
+*.db
+output/
+out/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Git noise
+.git/
+.gitignore
