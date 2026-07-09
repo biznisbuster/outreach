@@ -25,8 +25,9 @@ else
     docker buildx use outreach
 fi
 
-# Perzistentni cache volume (preživljava container recreate)
-export BUILDX_CACHE_VOLUME="outreach-buildcache"
+# Perzistentni cache (local folder, preživljava container recreate)
+# type=volume ne radi na buildx v0.30, koristimo type=local
+export BUILDX_CACHE_DIR="${BUILDX_CACHE_DIR:-$HOME/.docker/buildx-cache}"
 
 # Koji servis? (default: sva tri)
 SERVICES="${@:-gui-astro scraper scraper-leads}"
@@ -50,14 +51,17 @@ build_one() {
     echo "  Building $svc  ($ctx)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Izvuci ime Dockerfile-a iz compose-a (default: Dockerfile)
     local dockerfile="$ctx/Dockerfile"
+    local cache_dir="$BUILDX_CACHE_DIR/$svc"
+
+    # type=local kešira u folder na hostu. Buildx 0.30 ima bag sa type=volume.
+    mkdir -p "$cache_dir"
 
     docker buildx build \
         --file "$dockerfile" \
         --tag "outreach-$svc:latest" \
-        --cache-from "type=registry,ref=outreach-cache:$svc" \
-        --cache-to "type=volume,name=$BUILDX_CACHE_VOLUME-$svc,mode=max" \
+        --cache-from "type=local,src=$cache_dir" \
+        --cache-to "type=local,dest=$cache_dir,mode=max" \
         --load \
         "$ctx"
 }

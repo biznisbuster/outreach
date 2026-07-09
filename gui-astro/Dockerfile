@@ -12,7 +12,8 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- build stage ----
-FROM node:20-alpine AS builder
+# Astro 7 zahteva Node >=22.12.0 — koristimo Node 22 LTS.
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -36,7 +37,7 @@ RUN rm -f .env.example AGENTS.md SESSION-SUMMARY.md 2>/dev/null || true
 RUN npm run build
 
 # ---- runner stage ----
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
