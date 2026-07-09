@@ -234,7 +234,7 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
               id="start-site-scrape"
               data-lead-id={id}
               data-website={lead.websiteNormalized}
-              class="relative inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-primary/30 bg-primary-soft text-primary transition-colors hover:bg-primary/15 disabled:opacity-70"
+              class="relative inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-primary bg-primary text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-70"
               title="Pokreni scrape sajta"
               aria-label="Pokreni scrape sajta"
             >
@@ -273,19 +273,18 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
       </div>
 
       {/* Scrape progress banner — icon-button + info tekst + full-width traka. */}
-      {/* `width: 100vw; margin-left: calc(50% - 50vw)` probija udesno do ivice viewporta */}
-      {/* (sidro sticky band-a je uzak). Banner ima padding preko celog viewporta, ali bar je full-100%. */}
+      {/* Banner je unutar sticky band-a (ne probija van njega), tako da se ne sukobljava */}
+      {/* sa sidebar-om. Banner je full-width unutar svog roditelja. */}
       <div
         id="site-scrape-progress"
         role="status"
         aria-live="polite"
-        class="hidden w-screen border-y-2 border-primary/40 bg-primary-soft/80 backdrop-blur"
-        style="margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);"
+        class="hidden w-full border-y-2 border-primary/40 bg-primary-soft/80 backdrop-blur"
       >
         <div class="px-6 py-3">
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div class="flex flex-wrap items-center gap-3">
             {/* Ikonica — isti stil kao dugme, sa spinner animacijom */}
-            <div class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary-soft text-primary">
+            <div class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground shadow-sm">
               <svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="3" />
                 <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />

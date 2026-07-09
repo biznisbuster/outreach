@@ -230,7 +230,7 @@ export function buildWhere(f: LeadFilterValues): SQL | undefined {
 
   if (f.lastEmailStatus !== "any") {
     conds.push(
-      sql`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) DESC LIMIT 1) = ${f.lastEmailStatus}`,
+      sql`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at) DESC, email_sends.id DESC LIMIT 1) = ${f.lastEmailStatus}`,
     );
   }
 
@@ -263,8 +263,8 @@ const SORT_COLS: Record<string, SQL | typeof schema.leads[keyof typeof schema.le
   m3Overall: sql`(SELECT overall_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
   m3Seo: sql`(SELECT seo_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
   m3Visual: sql`(SELECT visual_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
-  // Prefiksiranje email_sends.* — SQLite-u biva ambiguous (outer leads.created_at)
-  lastEmail: sql`(SELECT COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) DESC LIMIT 1)`,
+  // email_sends nema created_at — koristimo sent_at/queued_at, sa id kao tie-breaker
+  lastEmail: sql`(SELECT COALESCE(email_sends.sent_at, email_sends.queued_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at) DESC, email_sends.id DESC LIMIT 1)`,
 };
 
 export function buildOrderBy(sorts: SortEntry[]): SQL[] {

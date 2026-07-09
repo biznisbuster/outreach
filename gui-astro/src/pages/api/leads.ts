@@ -62,8 +62,8 @@ export const GET: APIRoute = async ({ url }) => {
       m3Overall: sql<number | null>`(SELECT overall_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
       m3Seo: sql<number | null>`(SELECT seo_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
       m3Visual: sql<number | null>`(SELECT visual_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
-      lastEmailStatus: sql<string | null>`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) DESC LIMIT 1)`,
-      lastEmailAt: sql<number | null>`(SELECT COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at, email_sends.created_at) DESC LIMIT 1)`,
+      lastEmailStatus: sql<string | null>`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at) DESC, email_sends.id DESC LIMIT 1)`,
+      lastEmailAt: sql<number | null>`(SELECT COALESCE(email_sends.sent_at, email_sends.queued_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(email_sends.sent_at, email_sends.queued_at) DESC, email_sends.id DESC LIMIT 1)`,
     })
     .from(schema.leads)
     .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
