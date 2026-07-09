@@ -1,0 +1,140 @@
+---
+/**
+ * FilterPanel — collapsible panel sa naprednim filterima.
+ *
+ * Props (sve su URL vrednosti, koriste se kao default za inpute):
+ *   filters: LeadFilterValues (parsed)
+ *   sources: ["manual","google_maps","import"]
+ *   emailStatuses: ["draft","queued","sent","failed","bounced"]
+ *
+ * Submit: regular <form method="GET"> koji ažurira URL.
+ * Klik na "Više filtera" toggle-uje vidljivost (details/summary nativno).
+ *
+ * Layout: 2 kolone grid (md+) za gust raspored.
+ */
+import type { LeadFilterValues } from "../lib/leads-query";
+import { SOURCES_LIST } from "../lib/leads-query";
+
+interface Props {
+  filters: LeadFilterValues;
+  open?: boolean;
+}
+const { filters, open = false } = Astro.props;
+const hasAdvanced =
+  filters.hasAnalysis ||
+  filters.minScore !== null || filters.maxScore !== null ||
+  filters.minReviews !== null || filters.maxReviews !== null ||
+  filters.minRating !== null || filters.maxRating !== null ||
+  filters.source || filters.importedFrom || filters.importedTo ||
+  filters.lastEmailStatus !== "any" || filters.category;
+---
+
+<details class="group/adv" open={open || hasAdvanced}>
+  <summary class="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-transparent px-3 text-sm font-medium hover:bg-accent">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform group-open/adv:rotate-90">
+      <polyline points="9 18 15 12 9 6"/>
+    </svg>
+    Više filtera
+    {hasAdvanced && <span class="rounded-full bg-primary px-1.5 py-0 text-[10px] font-semibold text-primary-foreground">●</span>}
+  </summary>
+
+  <div class="mt-3 rounded-lg border border-border bg-muted/20 p-4">
+    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <!-- M3 ocena (opseg) -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">M3 ukupna ocena (1-10)</label>
+        <div class="flex items-center gap-1.5">
+          <input type="number" name="minScore" min="1" max="10" value={filters.minScore ?? ""} placeholder="min" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+          <span class="text-xs text-muted-foreground">—</span>
+          <input type="number" name="maxScore" min="1" max="10" value={filters.maxScore ?? ""} placeholder="max" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+        </div>
+      </div>
+
+      <!-- Google Rating -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Google Rating (1-5)</label>
+        <div class="flex items-center gap-1.5">
+          <input type="number" name="minRating" min="1" max="5" step="0.1" value={filters.minRating ?? ""} placeholder="min" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+          <span class="text-xs text-muted-foreground">—</span>
+          <input type="number" name="maxRating" min="1" max="5" step="0.1" value={filters.maxRating ?? ""} placeholder="max" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+        </div>
+      </div>
+
+      <!-- Broj recenzija -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Broj recenzija</label>
+        <div class="flex items-center gap-1.5">
+          <input type="number" name="minReviews" min="0" value={filters.minReviews ?? ""} placeholder="min" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+          <span class="text-xs text-muted-foreground">—</span>
+          <input type="number" name="maxReviews" min="0" value={filters.maxReviews ?? ""} placeholder="max" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm" />
+        </div>
+      </div>
+
+      <!-- Kategorija -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Kategorija</label>
+        <input type="text" name="category" value={filters.category} placeholder="npr. frizer" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" />
+      </div>
+
+      <!-- Izvor -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Izvor</label>
+        <select name="source" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+          <option value="">Svi</option>
+          {SOURCES_LIST.map((s) => (
+            <option value={s} selected={filters.source === s}>{s}</option>
+          ))}
+        </select>
+      </div>
+
+      <!-- Poslednji email status -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Poslednji email status</label>
+        <select name="lastEmailStatus" class="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+          <option value="">Bilo koji</option>
+          {(["draft","queued","sent","failed","bounced"] as const).map((s) => (
+            <option value={s} selected={filters.lastEmailStatus === s}>{s}</option>
+          ))}
+        </select>
+      </div>
+
+      <!-- Import datum -->
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Importovano od</label>
+        <input type="date" name="importedFrom" value={filters.importedFrom} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" />
+      </div>
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-muted-foreground">Importovano do</label>
+        <input type="date" name="importedTo" value={filters.importedTo} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" />
+      </div>
+    </div>
+
+    <!-- Toggle brzi filteri -->
+    <div class="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3 text-sm">
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="hasScreenshot" value="1" checked={filters.hasScreenshot} class="h-4 w-4 rounded border-input" />
+        <span>Ima screenshot</span>
+      </label>
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="hasAnalysis" value="1" checked={filters.hasAnalysis} class="h-4 w-4 rounded border-input" />
+        <span>Ima M3 ocenu</span>
+      </label>
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="hasEmail" value="1" checked={filters.hasEmail} class="h-4 w-4 rounded border-input" />
+        <span>Ima email</span>
+      </label>
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="noWebsite" value="1" checked={filters.noWebsite} class="h-4 w-4 rounded border-input" />
+        <span>Bez sajta</span>
+      </label>
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="hasPhone" value="1" checked={filters.hasPhone} class="h-4 w-4 rounded border-input" />
+        <span>Ima telefon</span>
+      </label>
+      <label class="inline-flex cursor-pointer items-center gap-1.5">
+        <input type="checkbox" name="dnc" value="1" checked={filters.dnc === true} class="h-4 w-4 rounded border-input" />
+        <span>Samo DNC</span>
+      </label>
+    </div>
+  </div>
+</details>

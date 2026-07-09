@@ -1,0 +1,134 @@
+---
+/**
+ * SortHeader — <th> sa klik + shift+click za multi-sort.
+ *
+ * Props:
+ *   key       — identifikator kolone (mora biti u leads-query SORT_COLS)
+ *   label     — tekst u header-u
+ *   current   — parseSort() output (niz SortEntry)
+ *   align     — left/center/right (default left)
+ *   width     — tailwind width class
+ *   class     — extra klase za <th>
+ *
+ * Logika (u klijentu):
+ *   - Klik = single sort: zameni ceo niz sa [{key, dir}]
+ *   - Shift+Klik = multi-sort: toggle dir ili dodaj u niz
+ *
+ * Indikatori:
+ *   - ▲ za asc, ▼ za desc, · za nesortiranu
+ *   - Mali broj (1/2/3) za prioritet u multi-sortu
+ */
+interface Props {
+  colKey: string;
+  label: string;
+  currentSort: string; // encoded: "name:asc,city:desc"
+  align?: "left" | "center" | "right";
+  width?: string;
+  class?: string;
+  defaultDir?: "asc" | "desc";
+}
+const {
+  colKey,
+  label,
+  currentSort,
+  align = "left",
+  width,
+  class: cls = "",
+  defaultDir = "asc",
+} = Astro.props;
+
+// Izračunaj client-side indikatore (slanje u data-* za JS)
+const sorts = currentSort
+  ? currentSort.split(",").map((p) => {
+      const [k, d] = p.split(":");
+      return { key: k, dir: d === "asc" ? "asc" : "desc" };
+    })
+  : [{ key: "createdAt", dir: "desc" }];
+const idx = sorts.findIndex((s) => s.key === colKey);
+const dir = idx >= 0 ? sorts[idx].dir : null;
+const priority = idx >= 0 ? idx + 1 : null;
+
+const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+const justifyClass = align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start";
+
+const arrow = dir === "asc" ? "▲" : dir === "desc" ? "▼" : "";
+const indicatorColor = dir ? "text-primary" : "text-muted-foreground/30";
+---
+<th
+  data-sort-key={colKey}
+  data-default-dir={defaultDir}
+  class:list={[
+    "sort-header px-3 py-2 select-none",
+    alignClass,
+    width,
+    cls,
+  ]}
+>
+  <button
+    type="button"
+    class:list={[
+      "inline-flex items-center gap-1.5 font-medium uppercase tracking-wider text-xs cursor-pointer hover:text-foreground transition-colors",
+      justifyClass,
+    ]}
+    title="Klik = primary sort · Shift+Klik = dodaj u multi-sort"
+    aria-label={`Sortiraj po ${label}`}
+  >
+    <span>{label}</span>
+    {arrow && <span class:list={["text-[10px]", indicatorColor]}>{arrow}</span>}
+    {priority !== null && (
+      <span class:list={["rounded bg-primary/15 px-1 py-0 text-[9px] font-bold text-primary"]}>{priority}</span>
+    )}
+  </button>
+</th>
+
+<script is:inline>
+  // Multi-column sort handler — Klik = primary, Shift+Klik = dodaj u multi-sort
+  document.addEventListener("click", function (e) {
+    var btn = e.target;
+    // Pronađi najbliže .sort-header dugme
+    if (!(btn instanceof Element)) return;
+    var headerEl = btn.closest(".sort-header");
+    if (!headerEl) return;
+    var th = btn.closest("th[data-sort-key]");
+    if (!th) return;
+
+    var key = th.getAttribute("data-sort-key");
+    var defaultDir = th.getAttribute("data-default-dir") || "asc";
+    var currentRaw = th.getAttribute("data-current-sort") || "createdAt:desc";
+
+    // Parse current
+    var sorts = currentRaw.split(",").map(function (p) {
+      var parts = p.split(":");
+      return { key: parts[0], dir: parts[1] === "asc" ? "asc" : "desc" };
+    });
+
+    var newSorts;
+    var idx = sorts.findIndex(function (s) { return s.key === key; });
+
+    if (!e.shiftKey) {
+      // Single sort
+      if (sorts.length === 1 && idx >= 0) {
+        // Toggle dir na jedinom ključu
+        newSorts = [{ key: key, dir: sorts[0].dir === "asc" ? "desc" : "asc" }];
+      } else {
+        newSorts = [{ key: key, dir: defaultDir }];
+      }
+    } else {
+      // Multi-sort
+      if (idx >= 0) {
+        var copy = sorts.slice();
+        copy[idx] = { key: key, dir: copy[idx].dir === "asc" ? "desc" : "asc" };
+        newSorts = copy;
+      } else {
+        newSorts = sorts.concat([{ key: key, dir: defaultDir }]);
+      }
+    }
+
+    var encoded = newSorts.map(function (s) { return s.key + ":" + s.dir; }).join(",");
+
+    var params = new URLSearchParams(location.search);
+    params.set("sort", encoded);
+    params.delete("page"); // reset na prvu stranu
+    location.search = params.toString();
+  });
+</script>

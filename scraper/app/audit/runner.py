@@ -100,8 +100,9 @@ def run_audit(lead_id: int, *, audit_id: int | None = None) -> dict:
         "pitch_advice": verdict["advice"],
         "top_issues": top_issues,
         "categories": ranked,
-        "metrics": signals["category_metrics"],
-        "pages": signals["pages"],
+        # Persist per-page data under metrics.pages so DB.create_audit stores it
+        # in metrics_json. The Astro AuditPanel reads report.metrics.pages.
+        "metrics": {**signals["category_metrics"], "pages": signals["pages"]},
         "duration_ms": duration_ms,
         "created_at": int(time.time() * 1000),
     }

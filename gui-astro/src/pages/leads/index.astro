@@ -1,61 +1,97 @@
 ---
+/**
+ * /leads — napredna tabela sa collapsible filterima, multi-sort, fiksne visine.
+ *
+ * Layout:
+ *   1. FilterBar (search + status + campaign + city) + "Više filtera" panel
+ *   2. Sortable header (klik = primary, Shift+Klik = multi-sort sa prioritetom)
+ *   3. Tabela sa fiksnom visinom (~70vh), sticky <thead>, vertikalni scroll unutar
+ *
+ * Sva logika (filteri, sort, kolone) je u `lib/leads-query.ts`.
+ */
 import AppLayout from "../../layouts/AppLayout.astro";
 import Card from "../../components/Card.astro";
 import CardContent from "../../components/CardContent.astro";
-import CardHeader from "../../components/CardHeader.astro";
-import CardTitle from "../../components/CardTitle.astro";
-import CardDescription from "../../components/CardDescription.astro";
 import PageHeader from "../../components/PageHeader.astro";
+import SortHeader from "../../components/SortHeader.astro";
+import FilterPanel from "../../components/FilterPanel.astro";
 import { getDb, schema } from "../../lib/db";
-import { asc, count } from "drizzle-orm";
-import { and, eq, isNull, sql, desc, like, or } from "drizzle-orm";
+import { asc } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import AddLeadDialog from "../../components/AddLeadDialog.astro";
 import LeadIdentity from "../../components/LeadIdentity.astro";
+import {
+  parseFilters,
+  parseSort,
+  buildWhere,
+  buildOrderBy,
+  COLUMNS,
+} from "../../lib/leads-query";
 
 const db = getDb();
 const url = Astro.url;
-const search = url.searchParams.get("search") ?? "";
-const statusId = url.searchParams.get("statusId") ?? "";
-const campaignId = url.searchParams.get("campaignId") ?? "";
-const city = url.searchParams.get("city") ?? "";
-const pageNum = Number(url.searchParams.get("page") ?? "1");
-const pageSize = 50;
+const sp = url.searchParams;
 
-const conds: any[] = [];
-if (search) {
-  const s = `%${search}%`;
-  conds.push(sql`(lower(${schema.leads.name}) LIKE lower(${s}) OR lower(coalesce(${schema.leads.email},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.city},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.websiteNormalized},'')) LIKE lower(${s}))`);
-}
-if (statusId === "null") conds.push(isNull(schema.leads.statusId));
-else if (statusId) conds.push(eq(schema.leads.statusId, Number(statusId)));
-if (campaignId) conds.push(eq(schema.leads.campaignId, Number(campaignId)));
-if (city) conds.push(eq(schema.leads.city, city));
+const filters = parseFilters(sp);
+const sortParam = sp.get("sort") ?? "";
+const sorts = parseSort(sortParam);
+const where = buildWhere(filters);
+const orderBy = buildOrderBy(sorts);
 
-const where = conds.length ? and(...conds) : undefined;
+const pageNum = Math.max(1, Number(sp.get("page") ?? "1"));
+const pageSize = Math.min(Math.max(1, Number(sp.get("pageSize") ?? "100")), 500);
 
-const items = db
+// Dinamički SELECT — kolone koje render treba
+const baseSelect = db
   .select({
-    lead: schema.leads,
+    id: schema.leads.id,
+    name: schema.leads.name,
+    category: schema.leads.category,
+    phoneRaw: schema.leads.phoneRaw,
+    phoneE164: schema.leads.phoneE164,
+    email: schema.leads.email,
+    websiteRaw: schema.leads.websiteRaw,
+    websiteNormalized: schema.leads.websiteNormalized,
+    address: schema.leads.address,
+    city: schema.leads.city,
+    postalCode: schema.leads.postalCode,
+    googleRating: schema.leads.googleRating,
+    reviewsCount: schema.leads.reviewsCount,
+    source: schema.leads.source,
+    sourceUrl: schema.leads.sourceUrl,
+    lat: schema.leads.lat,
+    lng: schema.leads.lng,
+    statusId: schema.leads.statusId,
+    doNotContact: schema.leads.doNotContact,
+    importedAt: schema.leads.importedAt,
+    createdAt: schema.leads.createdAt,
+    updatedAt: schema.leads.updatedAt,
+    campaignId: schema.leads.campaignId,
     statusName: schema.statuses.name,
     statusColor: schema.statuses.color,
     campaignName: schema.campaigns.name,
     hasScreenshot: sql<number>`CASE WHEN EXISTS (SELECT 1 FROM screenshots s WHERE s.lead_id = ${schema.leads.id}) THEN 1 ELSE 0 END`,
+    m3Overall: sql<number | null>`(SELECT overall_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+    m3Seo: sql<number | null>`(SELECT seo_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+    m3Visual: sql<number | null>`(SELECT visual_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+    lastEmailStatus: sql<string | null>`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1)`,
+    lastEmailAt: sql<number | null>`(SELECT COALESCE(sent_at, queued_at, created_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1)`,
   })
   .from(schema.leads)
   .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
   .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.leads.campaignId))
-  .where(where)
-  .orderBy(desc(schema.leads.createdAt))
-  .limit(pageSize)
-  .offset((pageNum - 1) * pageSize)
-  .all();
+  .where(where);
 
-const totalRow = db.select({ c: count() }).from(schema.leads).where(where).all()[0];
+const items = orderBy.length > 0
+  ? baseSelect.orderBy(...orderBy).limit(pageSize).offset((pageNum - 1) * pageSize).all()
+  : baseSelect.orderBy(sql`${schema.leads.createdAt} DESC`).limit(pageSize).offset((pageNum - 1) * pageSize).all();
+
+const totalRow = db.select({ c: sql<number>`count(*)` }).from(schema.leads).where(where).all()[0];
 const total = Number(totalRow?.c ?? 0);
 const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
 const statuses = db.select().from(schema.statuses).orderBy(asc(schema.statuses.sortOrder)).all();
-const campaigns = db.select({ id: schema.campaigns.id, name: schema.campaigns.name }).from(schema.campaigns).all();
+const campaigns = db.select({ id: schema.campaigns.id, name: schema.campaigns.name }).from(schema.campaigns).orderBy(asc(schema.campaigns.name)).all();
 const cities = db
   .selectDistinct({ city: schema.leads.city })
   .from(schema.leads)
@@ -64,19 +100,121 @@ const cities = db
   .map((r) => r.city)
   .filter(Boolean) as string[];
 
+// ─── Render helpers ──────────────────────────────────────────────────
+
+function fmtDate(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleDateString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function fmtDateTime(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("sr-RS", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function scoreBadge(s: number | null | undefined, max = 10): string {
+  if (s == null) return `<span class="text-muted-foreground/50">—</span>`;
+  // 1-10 skala → boja
+  const pct = s / max;
+  const color = pct >= 0.7 ? "emerald" : pct >= 0.4 ? "amber" : "red";
+  return `<span class="inline-flex h-6 min-w-[2.25rem] items-center justify-center rounded-full bg-${color}-100 px-1.5 text-xs font-semibold text-${color}-700 dark:bg-${color}-900/40 dark:text-${color}-300">${s}</span>`;
+}
+
+function statusBadge(name: string | null, color: string | null): string {
+  if (!name) return `<span class="text-muted-foreground/50">—</span>`;
+  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs" style="background:${color}1a;color:${color}">${escapeHtml(name)}</span>`;
+}
+
+function lastEmailCell(status: string | null, at: number | null): string {
+  if (!status) return `<span class="text-muted-foreground/50">—</span>`;
+  const colorMap: Record<string, string> = {
+    sent: "emerald", failed: "red", bounced: "red", queued: "amber", draft: "muted-foreground", sending: "amber",
+  };
+  const color = colorMap[status] ?? "muted-foreground";
+  return `<div class="flex flex-col items-center gap-0.5">
+    <span class="inline-flex items-center rounded-full bg-${color}/15 px-2 py-0.5 text-[10px] font-medium text-${color}">${escapeHtml(status)}</span>
+    ${at ? `<span class="text-[10px] text-muted-foreground">${fmtDate(at)}</span>` : ""}
+  </div>`;
+}
+
+function escapeHtml(s: string | null | undefined): string {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+// Render jedne ćelije po ključu
+function renderCell(colKey: string, r: typeof items[number]): string {
+  switch (colKey) {
+    case "name":
+      return `<div class="flex items-start gap-2">
+        <div class="min-w-0 flex-1">
+          <a href="/leads/${r.id}" class="font-medium text-foreground hover:underline">${escapeHtml(r.name)}</a>
+          ${r.address ? `<div class="mt-0.5 truncate text-xs text-muted-foreground">${escapeHtml(r.address)}</div>` : ""}
+        </div>
+        ${r.doNotContact ? `<span class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">DNC</span>` : ""}
+      </div>`;
+    case "status":
+      return statusBadge(r.statusName ?? null, r.statusColor ?? null);
+    case "campaign":
+      return r.campaignName ? escapeHtml(r.campaignName) : `<span class="text-muted-foreground/50">—</span>`;
+    case "category":
+      return r.category ? escapeHtml(r.category) : `<span class="text-muted-foreground/50">—</span>`;
+    case "city":
+      return r.city ? escapeHtml(r.city) : `<span class="text-muted-foreground/50">—</span>`;
+    case "email":
+      return r.email ? `<a href="mailto:${escapeHtml(r.email)}" class="text-primary hover:underline">${escapeHtml(r.email)}</a>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "phone":
+      return r.phoneE164 ? `<a href="tel:${escapeHtml(r.phoneE164)}" class="text-primary hover:underline">${escapeHtml(r.phoneE164)}</a>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "website":
+      return r.websiteNormalized ? `<a href="https://${escapeHtml(r.websiteNormalized)}" target="_blank" rel="noopener" class="text-primary hover:underline">${escapeHtml(r.websiteNormalized)}</a>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "googleRating":
+      return r.googleRating != null ? `<span class="inline-flex items-center gap-0.5 text-sm font-medium">★ <span>${r.googleRating.toFixed(1)}</span></span>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "reviewsCount":
+      return r.reviewsCount != null ? `<span class="tabular-nums">${r.reviewsCount.toLocaleString("sr-RS")}</span>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "m3Overall":
+      return scoreBadge(r.m3Overall);
+    case "m3Seo":
+      return scoreBadge(r.m3Seo);
+    case "m3Visual":
+      return scoreBadge(r.m3Visual);
+    case "lastEmail":
+      return lastEmailCell(r.lastEmailStatus, r.lastEmailAt);
+    case "importedAt":
+      return `<span class="text-xs text-muted-foreground">${fmtDate(r.importedAt instanceof Date ? r.importedAt.getTime() : Number(r.importedAt))}</span>`;
+    case "doNotContact":
+      return r.doNotContact ? `<span class="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">DNC</span>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "source":
+      return r.source ? `<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">${escapeHtml(r.source)}</span>` : `<span class="text-muted-foreground/50">—</span>`;
+    case "screenshot":
+      return r.hasScreenshot ? `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="inline text-emerald-600"><polyline points="20 6 9 17 4 12"/></svg>` : "";
+    default:
+      return "";
+  }
+}
+
 function buildUrl(overrides: Record<string, string | number | null | undefined>) {
   const params = new URLSearchParams();
-  for (const [k, v] of Object.entries({ search, statusId, campaignId, city, page: String(pageNum), ...overrides })) {
+  for (const [k, v] of Object.entries({ ...Object.fromEntries(sp.entries()), page: String(pageNum), ...overrides })) {
     if (v !== null && v !== undefined && v !== "") params.set(k, String(v));
   }
   return `/leads?${params.toString()}`;
 }
+
+const hasAnyFilter =
+  filters.search || filters.statusId || filters.campaignId || filters.city ||
+  filters.hasEmail || filters.noWebsite || filters.hasPhone || filters.hasScreenshot || filters.hasAnalysis ||
+  filters.dnc !== "any" || filters.minScore !== null || filters.maxScore !== null ||
+  filters.minReviews !== null || filters.maxReviews !== null ||
+  filters.minRating !== null || filters.maxRating !== null ||
+  filters.source || filters.importedFrom || filters.importedTo ||
+  filters.lastEmailStatus !== "any" || filters.category;
 ---
+
 <AppLayout title="Leadovi — Outreach">
   <div>
     <PageHeader
       title="Leadovi"
-      subtitle={`${total} ${total === 1 ? "lead" : "leadova"} · strana ${pageNum}/${totalPages}`}
+      subtitle={`${total.toLocaleString("sr-RS")} ${total === 1 ? "lead" : "leadova"}${hasAnyFilter ? " · filtrirano" : ""}${totalPages > 1 ? ` · strana ${pageNum}/${totalPages}` : ""}`}
     >
       <AddLeadDialog
         slot="actions"
@@ -85,123 +223,153 @@ function buildUrl(overrides: Record<string, string | number | null | undefined>)
       />
     </PageHeader>
 
-    <div class="space-y-6 p-6">
-      <!-- Filteri -->
+    <div class="space-y-4 p-6">
+      <!-- FilterBar + collapsible advanced -->
       <Card>
         <CardContent class="pt-6">
-          <form method="get" class="flex flex-wrap items-center gap-2">
-            <input
-              type="text"
-              name="search"
-              value={search}
-              placeholder="Pretraga (naziv, email, grad, web)"
-              class="flex h-9 w-72 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
-            <select name="statusId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-              <option value="">Svi statusi</option>
-              <option value="null" selected={statusId === "null"}>Bez statusa</option>
-              {statuses.map((s) => (
-                <option value={String(s.id)} selected={statusId === String(s.id)}>{s.name}</option>
-              ))}
-            </select>
-            <select name="campaignId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-              <option value="">Sve kampanje</option>
-              {campaigns.map((c) => (
-                <option value={String(c.id)} selected={campaignId === String(c.id)}>{c.name}</option>
-              ))}
-            </select>
-            <select name="city" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-              <option value="">Svi gradovi</option>
-              {cities.map((c) => (
-                <option value={c} selected={city === c}>{c}</option>
-              ))}
-            </select>
-            <button type="submit" class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Filtriraj</button>
-            {(search || statusId || campaignId || city) && (
-              <a href="/leads" class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Reset</a>
-            )}
+          <form method="get" class="space-y-3">
+            <!-- Skriveno: sačuvaj sort -->
+            <input type="hidden" name="sort" value={sortParam} />
+
+            <!-- Osnovni filteri (uvek vidljivi) -->
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                name="search"
+                value={filters.search}
+                placeholder="Pretraga (naziv, email, grad, web, kategorija)"
+                class="flex h-9 w-72 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <select name="statusId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                <option value="">Svi statusi</option>
+                <option value="null" selected={filters.statusId === "null"}>Bez statusa</option>
+                {statuses.map((s) => (
+                  <option value={String(s.id)} selected={filters.statusId === String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <select name="campaignId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                <option value="">Sve kampanje</option>
+                {campaigns.map((c) => (
+                  <option value={String(c.id)} selected={filters.campaignId === String(c.id)}>{c.name}</option>
+                ))}
+              </select>
+              <select name="city" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                <option value="">Svi gradovi</option>
+                {cities.map((c) => (
+                  <option value={c} selected={filters.city === c}>{c}</option>
+                ))}
+              </select>
+              <button type="submit" class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Filtriraj</button>
+              {hasAnyFilter && (
+                <a href={buildUrl({ sort: sortParam, page: null, search: null, statusId: null, campaignId: null, city: null, hasEmail: null, noWebsite: null, hasPhone: null, hasScreenshot: null, hasAnalysis: null, dnc: null, minScore: null, maxScore: null, minReviews: null, maxReviews: null, minRating: null, maxRating: null, source: null, importedFrom: null, importedTo: null, lastEmailStatus: null, category: null })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Reset</a>
+              )}
+            </div>
+
+            <!-- Collapsible advanced filters -->
+            <FilterPanel filters={filters} />
           </form>
         </CardContent>
       </Card>
 
-      <!-- Tabela -->
-      <Card>
-        <div class="overflow-x-auto">
+      <!-- Tabela sa fiksnom visinom -->
+      <Card class="overflow-hidden">
+        <div class="leads-table-wrapper overflow-auto" style="max-height: calc(100vh - 380px);">
           <table class="w-full text-sm">
-            <thead class="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+            <thead class="sticky top-0 z-10 border-b bg-card text-xs uppercase tracking-wider text-muted-foreground shadow-sm">
               <tr>
-                <th class="px-4 py-2">Naziv</th>
-                <th class="px-4 py-2">Status</th>
-                <th class="px-4 py-2">Kampanja</th>
-                <th class="px-4 py-2">Grad</th>
-                <th class="px-4 py-2">Email</th>
-                <th class="px-4 py-2">Telefon</th>
-                <th class="px-4 py-2">Web</th>
-                <th class="px-4 py-2" title="Screenshot">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
-                </th>
+                {COLUMNS.map((col) => (
+                  col.sortable ? (
+                    <SortHeader
+                      colKey={col.key}
+                      label={col.label}
+                      currentSort={sortParam}
+                      align={col.align}
+                      width={col.width}
+                      defaultDir={col.defaultDir ?? "asc"}
+                    />
+                  ) : (
+                    <th
+                      class:list={[
+                        "px-3 py-2",
+                        col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left",
+                        col.width,
+                      ]}
+                      set:html={col.headerHtml ?? col.label}
+                    />
+                  )
+                ))}
               </tr>
             </thead>
             <tbody class="divide-y">
               {items.length === 0 ? (
-                <tr><td colspan="8" class="px-4 py-12 text-center text-muted-foreground">Nema leadova za zadane filtere.</td></tr>
+                <tr><td colspan={String(COLUMNS.length)} class="px-4 py-12 text-center text-muted-foreground">Nema leadova za zadane filtere.</td></tr>
               ) : items.map((r) => (
-                <tr class="hover:bg-accent">
-                  <td class="px-4 py-2">
-                    <div class="flex items-start gap-2">
-                      <div class="min-w-0 flex-1">
-                        <LeadIdentity
-                          lead={{ id: r.lead.id, name: r.lead.name, category: r.lead.category, city: r.lead.city }}
-                          href={`/leads/${r.lead.id}`}
-                          variant="default"
-                        />
-                        {(r.lead.address) && (
-                          <div class="mt-0.5 truncate text-xs text-muted-foreground">{r.lead.address}</div>
-                        )}
-                      </div>
-                      {r.lead.doNotContact && (
-                        <span class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">DNC</span>
-                      )}
-                    </div>
-                  </td>
-                  <td class="px-4 py-2">
-                    {r.statusName ? (
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs" style={`background:${r.statusColor}1a;color:${r.statusColor}`}>{r.statusName}</span>
-                    ) : <span class="text-muted-foreground">—</span>}
-                  </td>
-                  <td class="px-4 py-2 text-muted-foreground">{r.campaignName ?? "—"}</td>
-                  <td class="px-4 py-2 text-muted-foreground">{r.lead.city ?? "—"}</td>
-                  <td class="px-4 py-2">
-                    {r.lead.email ? (
-                      <a href={`mailto:${r.lead.email}`} class="text-primary hover:underline">{r.lead.email}</a>
-                    ) : "—"}
-                  </td>
-                  <td class="px-4 py-2">
-                    {r.lead.phoneE164 ? (
-                      <a href={`tel:${r.lead.phoneE164}`} class="text-primary hover:underline">{r.lead.phoneE164}</a>
-                    ) : "—"}
-                  </td>
-                  <td class="px-4 py-2">
-                    {r.lead.websiteNormalized ? (
-                      <a href={`https://${r.lead.websiteNormalized}`} target="_blank" rel="noopener" class="text-primary hover:underline">{r.lead.websiteNormalized}</a>
-                    ) : "—"}
-                  </td>
-                  <td class="px-4 py-2 text-center">{r.hasScreenshot ? <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="inline text-emerald-600"><polyline points="20 6 9 17 4 12"/></svg> : ""}</td>
+                <tr class="hover:bg-accent/50">
+                  {COLUMNS.map((col) => (
+                    <td
+                      class:list={[
+                        "px-3 py-2",
+                        col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left",
+                      ]}
+                      set:html={renderCell(col.key, r)}
+                    />
+                  ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </Card>
 
-      <!-- Paginacija -->
-      {totalPages > 1 && (
-        <div class="flex items-center justify-center gap-2">
-          {pageNum > 1 && <a href={buildUrl({ page: pageNum - 1 })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">← Prethodna</a>}
-          <span class="text-sm text-muted-foreground">Strana {pageNum} od {totalPages}</span>
-          {pageNum < totalPages && <a href={buildUrl({ page: pageNum + 1 })} class="inline-flex h-9 items-center rounded-md border px-4 text-sm hover:bg-accent">Sledeća →</a>}
-        </div>
-      )}
+        <!-- Paginacija (inline, ispod tabele) -->
+        {totalPages > 1 && (
+          <div class="flex items-center justify-between border-t bg-muted/30 px-4 py-2 text-sm">
+            <span class="text-xs text-muted-foreground">
+              {((pageNum - 1) * pageSize + 1).toLocaleString("sr-RS")}–{Math.min(pageNum * pageSize, total).toLocaleString("sr-RS")} od {total.toLocaleString("sr-RS")}
+            </span>
+            <div class="flex items-center gap-2">
+              <select name="pageSize" form="leads-page-form" onchange="this.form.submit()" class="h-7 rounded-md border border-input bg-background px-2 text-xs">
+                {[50, 100, 200, 500].map((n) => (
+                  <option value={String(n)} selected={pageSize === n}>{n} po strani</option>
+                ))}
+              </select>
+              <form id="leads-page-form" method="get" class="contents">
+                <input type="hidden" name="sort" value={sortParam} />
+                {Array.from(sp.entries()).filter(([k]) => k !== "page" && k !== "pageSize" && k !== "sort").map(([k, v]) => (
+                  <input type="hidden" name={k} value={v} />
+                ))}
+                {pageNum > 1 && (
+                  <a href={buildUrl({ page: pageNum - 1 })} class="inline-flex h-7 items-center rounded-md border px-3 text-xs hover:bg-accent">←</a>
+                )}
+                <span class="text-xs">Strana {pageNum} / {totalPages}</span>
+                {pageNum < totalPages && (
+                  <a href={buildUrl({ page: pageNum + 1 })} class="inline-flex h-7 items-center rounded-md border px-3 text-xs hover:bg-accent">→</a>
+                )}
+              </form>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   </div>
 </AppLayout>
+
+<style is:global>
+  /* Sticky header — ostaje vidljiv dok korisnik skroluje unutar tabele */
+  .leads-table-wrapper thead th {
+    position: sticky;
+    top: 0;
+    background: hsl(var(--card));
+    z-index: 10;
+  }
+  /* Sort header kursor + hover */
+  .sort-header button {
+    user-select: none;
+  }
+  .sort-header button:hover {
+    color: hsl(var(--foreground));
+  }
+  /* Sticky header shadow pojačan na skroll */
+  .leads-table-wrapper thead {
+    box-shadow: 0 1px 0 hsl(var(--border));
+  }
+</style>

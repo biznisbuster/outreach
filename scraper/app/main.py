@@ -16,13 +16,14 @@ from . import db
 from .sitemap_parser import find_sitemap, parse_sitemap
 from .page_scraper import scrape_page
 from .categorize import filter_pages
-from .screenshot import capture_screenshot
+from .screenshot import capture_screenshot, _default_screenshots_dir
 from .jobs import create_job, get_job, update_job, job_to_dict
 from .audit import runner as audit_runner
 
 MAX_PAGES = int(os.environ.get("MAX_PAGES_PER_LEAD", "30"))
-SCREENSHOTS_DIR = os.environ.get("SCREENSHOTS_DIR", "/data/screenshots")
+SCREENSHOTS_DIR = os.environ.get("SCREENSHOTS_DIR") or _default_screenshots_dir()
 DELAY_SEC = float(os.environ.get("SCRAPE_DELAY_SEC", "1.0"))
+SCREENSHOT_PRE_WAIT_MS = int(os.environ.get("SCREENSHOT_PRE_WAIT_MS", "5000"))
 
 app = FastAPI(title="Outreach Scraper", version="0.2.0")
 app.add_middleware(
@@ -130,7 +131,7 @@ def run_scrape_job(job_id: str, lead_id: int, max_pages: int):
     # 3) screenshot
     screenshot_path = None
     try:
-        screenshot_path = capture_screenshot(base_url, lead_id, SCREENSHOTS_DIR)
+        screenshot_path = capture_screenshot(base_url, lead_id, SCREENSHOTS_DIR, pre_wait_ms=SCREENSHOT_PRE_WAIT_MS)
         if screenshot_path:
             db.insert_screenshot(lead_id, screenshot_path)
     except Exception as e:

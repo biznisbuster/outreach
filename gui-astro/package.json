@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:migrate-attachments": "bash scripts/migrate-attachments.sh"
+    "db:migrate-attachments": "bash scripts/migrate-attachments.sh",
+    "db:check": "bash scripts/migrate-attachments.sh --check"
   },
   "dependencies": {
     "@astrojs/node": "^11.0.2",

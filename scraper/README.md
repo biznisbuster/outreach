@@ -103,6 +103,44 @@ Visitor counts are intentionally absent (no free provider). If a user later
 sets up SimilarWeb, swap the implementation of `traffic_module.traffic_signals`
 in `app/audit/traffic.py` — no other code changes needed.
 
+## Frontend (gui-astro)
+
+The Astro GUI surfaces the audit on the lead detail page (`/leads/[id]`) as a
+second tab next to the existing Overview content:
+
+```
+[ Overview ]   [ Site Audit  67 ]
+                ↑
+                tab nav has a colour-coded badge for the latest rank
+```
+
+When the user opens the **Site Audit** tab they see, in order:
+
+1. **Big rank + verdict pill** — overall_rank 0–100, color-coded by band.
+2. **Pitch advice** — one-liner ("Aggressive pitch", "Strong pitch", etc.).
+3. **Top issues** — highest-impact findings, sorted by category weight.
+4. **Categories** — 7 weighted bar charts (SEO, Performance, Content, …).
+5. **Detaljne metrike** — every measured value, collapsible per category.
+6. **Stranice** — per-page table sorted by score, with quick expand to issues.
+
+The "Run audit now" button (or "Re-audit" when one exists) calls
+`POST /api/site-audit/[leadId]/run` (an Astro proxy to this service) and
+swaps the panel content when the request returns. Tab state is bookmarkable
+via `?tab=audit` or `#audit`.
+
+Files in `gui-astro/`:
+
+```
+src/components/AuditPanel.astro                  # server-rendered tab content
+src/lib/siteAudit.ts                            # Drizzle queries for the tables
+src/pages/api/site-audit/[leadId]/latest.ts     # GET   latest audit for a lead
+src/pages/api/site-audit/[leadId]/run.ts        # POST  trigger fresh audit
+src/pages/leads/[id].astro                      # tab nav + AuditPanel mount
+```
+
+If there is no successful `/scrape` yet for a lead, the panel shows a "no
+scrape — run one first" prompt instead of a "Run audit" button.
+
 ## How it works
 
 ```

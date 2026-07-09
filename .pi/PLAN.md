@@ -1,7 +1,7 @@
 # redesign whole ui/ux not changing functionaility astro-gui
 
 _Generated: 2026-07-08T22:01:08.429Z_
-_Last updated: 2026-07-09T13:19:39.028Z_
+_Last updated: 2026-07-09T13:59:19.352Z_
 
 ## Context
 
@@ -48,6 +48,10 @@ Project: `/home/usrtmp/Projects/local/scrapers/gui`
 ### 10. UI side — should I build an Astro page (`gui-astro/src/pages/audits/[id].astro`) that renders the audit as a dashboard (per-category score cards, traffic signals, top issues, verdict banner)? Or keep this iteration pure-API and only return JSON (you can wire up the UI later)?
 
 **Answer:** API only — return the JSON report from /audit/{lead_id} and store it. You can wire up the UI yourself later.
+
+### 11. The current lead page has no tabs — it's one long scroll with Contact, Email, Screenshots on the left and Actions, Comments, Details on the right. Where should the new "Audit" tab live, and how aggressive should the restructure be?
+
+**Answer:** Two tabs only — Add minimal tab nav with two tabs: "Overview" (current content) + "Audit" (new audit data). Keeps everything else as-is.
 
 
 ## Research Notes
@@ -140,239 +144,198 @@ Scoring is pure Python — no LLM in the loop. Existing site_analysis (AI 1-10 f
 
 
 
-# Email attachments — dizajn + implementacija
+# Leads refaktor — napredan filter, sort, fiksna visina
 
-## Cilj
+## Odlike (potvrđene)
 
-Dozvoliti slanje email-ova sa attachment fajlovima (PDF ponude, slike…).
-Template ima default attachment; draft može da ga override-uje. Svi fajlovi
-idu kroz globalnu biblioteku.
-
-## Odluke (potvrđene)
-
-| Pitanje | Odgovor |
-|---|---|
-| Nivo | Template default + draft override (draft zamenjuje template) |
-| Max size | 10 MB |
-| Dozvoljeni tipovi | `application/pdf`, `image/jpeg`, `image/png`, `image/webp` |
-| UI | Globalna biblioteka (`/attachments`) + inline u template/draft editoru |
+- **Nove kolone:** Reviews, Google Rating, M3 Overall, M3 SEO, Last Email (status/datum)
+- **Sort:** Shift+click = multi-column sa prioritetom (1/2/3)
+- **Filteri:** Osnovni inline + collapsible "Više filtera" panel
 
 ## Arhitektura
 
 ```
-[Browser]
-  ├─ /attachments           → globalna biblioteka (upload/list/delete/preview)
-  ├─ /templates/[edit]      → attach fajlove na template (default za sve draft-ove)
-  └─ /queue/[edit draft]    → override attachment za pojedinačni draft
-
-[Upload API]
-  POST /api/attachments (multipart)
-    → validacija (size, MIME)
-    → SHA-256 izračun
-    → ako postoji sa istim sha256 → vrati postojeći (dedup)
-    → sačuvaj na ~/outreach-data/attachments/<sha256>.<ext>
-    → INSERT u `attachments`
-    → vrati { id, original_name, mime_type, size }
-
-[Send flow]
-  processQueue() za queued email:
-    1. Pokušaj draft override:
-       SELECT * FROM email_send_attachments WHERE email_send_id = ?
-       Ako ima → koristi SAMO ove (skip template)
-    2. Inače, ako email ima prompt_template_id:
-       SELECT * FROM template_attachments WHERE template_id = ?
-    3. Ako ništa → nema attachment-a
-
-  sendEmail({ ..., attachments: [{filename, path}] })
-    → nodemailer attachments: [{ filename, path }]
-    → multipart MIME, primaoc vidi attachment u inboxu
+Browser                           Server
+────────                          ──────
+GET /leads?sort=name:asc,...     →  parseSort(sort)
+                                  →  buildWhere(filters)   (Drizzle WHERE)
+                                  →  buildOrderBy(sorts)   (Drizzle ORDER BY)
+                                  →  LEFT JOIN subqueries za M3 + last email
+                                  →  render tabela
 ```
 
 ## Fajlovi
 
-### Novi API endpoint-i
-
-| Putanja | Metod | Svrha |
-|---|---|---|
-| `src/pages/api/attachments/index.ts` | POST, GET | upload + list |
-| `src/pages/api/attachments/[id].ts` | GET, DELETE | metadata + delete |
-| `src/pages/api/attachments/[id]/file.ts` | GET | download/preview (binarno) |
-| `src/pages/api/templates/[id]/attachments.ts` | POST, DELETE | veži/odveži na template |
-| `src/pages/api/email/drafts/[id]/attachments.ts` | POST, DELETE | override na draft |
-
-### Novi lib
+### Novi
 
 | Putanja | Svrha |
 |---|---|
-| `src/lib/attachments.ts` | `validateUpload()`, `saveAttachment()`, `getAttachmentsForSend()`, `purgeUnused()` |
+| `src/lib/leads-query.ts` | Centralna logika: `COLUMNS`, `parseSort()`, `encodeSort()`, `buildWhere()`, `buildOrderBy()`. Koristi ga i API i UI. |
+| `src/components/SortHeader.astro` | `<th>` komponenta: klik = sort, Shift+Klik = multi-sort. Prikazuje ▲▼ + broj prioriteta. |
+| `src/components/FilterPanel.astro` | Collapsible panel sa naprednim filterima (score range, reviews range, rating range, source, import datum, last email status). |
 
 ### Izmene
 
 | Putanja | Izmena |
 |---|---|
-| `src/lib/db/schema.ts` | +3 tabele (attachments, template_attachments, email_send_attachments) |
-| `src/lib/settings.ts` | +2 settings (attachment_max_size_mb, attachment_allowed_mime) u grupi "Email attachments" |
-| `src/lib/email/sender.ts` | `SendInput.attachments?: {filename, path}[]`, prosleđuje nodemailer-u |
-| `src/lib/workers/scheduler.ts` | Pre slanja, izračunaj `getAttachmentsForSend(emailSendId)` i prosledi |
-| `src/components/Sidebar.astro` | Dodaj "Attachments" link (Setup sekcija) |
-| `src/pages/templates.astro` | Prikaz i edit attachment-a u template formi |
-| `src/pages/queue.astro` | Prikaz attachment-a po draft-u, override UI |
-| `deploy/backup-outreach.sh` | +tar attachments dir u backup |
-| `docker-compose.vps.yml` | (nema izmene — attachment-i idu kroz postojeći `~/outreach-data:/data` mount) |
-| `README.md` | +sekcija "Email attachments" |
+| `src/pages/leads/index.astro` | Potpuni refaktor: novi FilterBar + collapsible panel + nova tabela sa fiksnom visinom + sticky header + multi-sort handler |
+| `src/pages/api/leads.ts` | Koristi `buildWhere` + `buildOrderBy` iz lib-a, dodaje subquery za M3 + last email |
 
-### Novi UI
+## URL parametri
 
-- `src/pages/attachments.astro` — globalna biblioteka
-  - Drag&drop zona za upload
-  - Tabela: ime, MIME, veličina, datum, [preview] [delete]
-  - Prazno stanje sa uputstvom
-- `src/components/AttachmentPicker.astro` — modal za izbor iz biblioteke
-- `src/components/AttachmentList.astro` — readonly lista sa remove dugmadima
+### Filter (svi postoje + novi)
 
-## Validacija
+| Parametar | Tip | Primer |
+|---|---|---|
+| `search` | string | `?search=zubar` |
+| `statusId` | id / "null" | `?statusId=3` |
+| `campaignId` | id | `?campaignId=5` |
+| `city` | string | `?city=Niš` |
+| `hasEmail` | 0/1 | `?hasEmail=1` |
+| `noWebsite` | 0/1 | `?noWebsite=1` |
+| `hasPhone` | 0/1 | `?hasPhone=1` |
+| `hasScreenshot` | 0/1 | `?hasScreenshot=1` |
+| `dnc` | 0/1 | `?dnc=0` |
+| **`hasAnalysis`** | 0/1 | `?hasAnalysis=1` (ima M3 ocenu) |
+| **`minScore`, `maxScore`** | number | `?minScore=7&maxScore=10` (M3 overall) |
+| **`minReviews`, `maxReviews`** | number | `?minReviews=10&maxReviews=100` |
+| **`minRating`, `maxRating`** | number | `?minRating=4&maxRating=5` |
+| **`source`** | string | `?source=google_maps` |
+| **`importedFrom`, `importedTo`** | ISO date | `?importedFrom=2026-01-01` |
+| **`lastEmailStatus`** | enum | `?lastEmailStatus=sent` (draft/queued/sent/failed/bounced/none) |
 
-```ts
-const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
-const MAX_SIZE_DEFAULT = 10 * 1024 * 1024; // 10MB
-// čita se iz settings `attachment_max_size_mb` i parsira `attachment_allowed_mime` (comma-list)
-```
+### Sort
 
-Upload validator:
-- `file.size > MAX_SIZE` → 400 "Max 10MB"
-- `!ALLOWED_MIME.includes(file.type)` → 400 "Tip nije dozvoljen"
-- Prazan fajl → 400
+`?sort=col1:dir1,col2:dir2,col3:dir3`
 
-## Storage
+- `col` = key iz `COLUMNS` definicije
+- `dir` = `asc` ili `desc`
+- Više kolona = multi-sort sa prioritetom (redosled u URL-u)
 
-```
-~/outreach-data/attachments/<sha256>.<ext>
-```
+Primeri:
+- `?sort=name:asc`
+- `?sort=createdAt:desc,name:asc` (primarni: noviji prvo, sekundarni: ime A-Z)
 
-- Van repo-a (kao `outreach.db`)
-- Lako se bekapuje (tar u `backup-outreach.sh`)
-- Deduplikacija po sha256 — isti fajl upload-ovan 2x ne duplira se
-- Container path: `/data/attachments/<sha256>.<ext>` (kroz postojeći mount)
+## Kolone
 
-## API detalji
-
-### POST /api/attachments (multipart)
-
-Request: `FormData { file: File }`
-Response 201: `{ id, original_name, mime_type, size, uploaded_at }`
-Errors: 400 (validacija), 413 (prevelik), 415 (pogrešan tip)
-
-### GET /api/attachments
-
-Response: `[{ id, original_name, mime_type, size, uploaded_at, used_by_templates: number, used_by_drafts: number }]`
-
-### DELETE /api/attachments/[id]
-
-- Ako `used_by_templates + used_by_drafts > 0` → 409 "Koristi se u N template-a i M draft-ova"
-- Inače: obriši fajl sa diska + DELETE row
-
-### POST /api/templates/[id]/attachments
-
-Body: `{ attachment_id: number }`
-→ INSERT u template_attachments (ON CONFLICT IGNORE)
-
-### POST /api/email/drafts/[id]/attachments
-
-Body: `{ attachment_id: number }`
-→ Briše SVE prethodne email_send_attachments za taj draft (override znači zamenu)
-→ INSERT novu
-
-## Settings (nova grupa "Email attachments")
-
-```yaml
-- key: attachment_max_size_mb
-  defaultValue: "10"
-  type: number
-  unit: MB
-  description: Maksimalna veličina po attachment fajlu...
-
-- key: attachment_allowed_mime
-  defaultValue: "application/pdf,image/jpeg,image/png,image/webp"
-  type: text
-  description: Dozvoljeni MIME tipovi (comma-separated)...
-```
-
-## UI flow
-
-### Upload attachment
-1. Odeš na `/attachments`
-2. Drag-drop ili klik → file picker
-3. Validacija uživo (size, MIME)
-4. Upload → pojavi se u listi
-5. Download dugme za preview
-
-### Dodaj na template
-1. Odeš na `/templates`
-2. Edit template → vidiš "Attachments (0)" sekcija
-3. Klik "Dodaj attachment" → modal sa listom iz biblioteke
-4. Izaberi → pojavi se u listi sa remove dugmetom
-
-### Override na draft
-1. Odeš na `/queue`
-2. Otvoriš draft → vidiš "Attachments: nasleđeno od template-a [x]" ILI "Custom: [...]"
-3. Klik "Zameni" → modal sa listom → izaberi
-4. Ili klik "Ukloni sve" da pošalješ bez attachment-a
-
-## Send logika (scheduler)
+Definisane u `COLUMNS` nizu (lib/leads-query.ts). Svaka ima:
+- `key` — URL/DB identifikator
+- `label` — header text
+- `sortable` — boolean
+- `align` — left/center/right
+- `class` — tailwind klase za ćeliju
+- `render` — (row) => HTML (za custom badge-ove, linkove itd.)
 
 ```ts
-// scheduler.ts, unutar processQueue()
-const attachments = getAttachmentsForSend(es.id); // draft override ILI template ILI []
-const sendRes = await sendEmail({
-  // ... postojeća polja
-  attachments,
-});
+type Col = {
+  key: string;
+  label: string;
+  sortable: boolean;
+  align?: "left" | "center" | "right";
+  width?: string;          // "w-32", "min-w-[100px]"
+  defaultSortDir?: "asc" | "desc";
+  render: (row: LeadRow) => string;  // sigurno-escaped HTML
+  raw?: (row: LeadRow) => unknown;    // za sortiranje ako je render drugačiji
+};
+
+const COLUMNS: Col[] = [
+  { key: "name", label: "Naziv", sortable: true, ... },
+  { key: "status", label: "Status", sortable: true, render: (r) => statusBadge(r.statusName, r.statusColor) },
+  { key: "campaign", label: "Kampanja", sortable: true, render: (r) => r.campaignName ?? "—" },
+  { key: "city", label: "Grad", sortable: true, ... },
+  { key: "email", label: "Email", sortable: true, ... },
+  { key: "phone", label: "Telefon", sortable: true, ... },
+  { key: "website", label: "Web", sortable: true, ... },
+  // NOVE:
+  { key: "googleRating", label: "Rating", sortable: true, align: "center", render: (r) => r.googleRating ? `${r.googleRating}/5` : "—" },
+  { key: "reviewsCount", label: "Recenzije", sortable: true, align: "right", render: (r) => r.reviewsCount ?? "—" },
+  { key: "m3Overall", label: "M3", sortable: true, align: "center", render: (r) => m3Badge(r.m3Overall) },
+  { key: "m3Seo", label: "SEO", sortable: true, align: "center", render: (r) => scoreBadge(r.m3Seo) },
+  { key: "lastEmail", label: "Posl. email", sortable: true, render: (r) => lastEmailCell(r.lastEmailStatus, r.lastEmailSentAt) },
+  { key: "screenshot", label: "📷", sortable: false, align: "center", ... },
+];
 ```
 
-`getAttachmentsForSend(emailSendId)`:
-1. SELECT * FROM email_send_attachments JOIN attachments WHERE email_send_id = ?
-2. Ako rows.length > 0 → vrati draft attachments (override)
-3. Inače ako email_send ima prompt_template_id:
-   SELECT * FROM template_attachments JOIN attachments WHERE template_id = ?
-4. Vrati prazan niz
+## Sort UX
 
-```ts
-// lib/email/sender.ts — SendInput
-export interface SendInput {
-  // ... postojeća polja
-  attachments?: { filename: string; path: string }[];
+- Klik na `<th>`: ako je već jedini primarni → toggle dir; inače postavi kao jedini primarni (asc).
+- Shift+Klik: dodaj u multi-sort (ako već postoji → toggle dir, ako je poslednji sa toggle na "asc" → ukloni).
+- Indikatori:
+  - `▲` za asc, `▼` za desc, prazno za nesortiranu
+  - Broj prioriteta (1, 2, 3) za multi-sort
+- Primer: `Name ▼1  City ▲2  Rating  (prazno)`
+
+## Filter panel UX
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ [search...] [Status v] [Kampanja v] [Grad v] [Filtriraj] [Reset]   │
+│                                                       [Više filtera v]│  ← toggle
+└────────────────────────────────────────────────────────────────────┘
+   Kada otvoreno:
+┌────────────────────────────────────────────────────────────────────┐
+│ M3 ocena: [min] — [max]     Recenzije: [min] — [max]               │
+│ Google: [min] — [max]       Izvor: [v]                             │
+│ Import: [od] [do]           Poslednji email: [v]                   │
+│ [x] Ima screenshot  [x] Ima M3 ocenu  [x] U DNC                   │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+State drži u URL parametrima. Submit dugme refrešuje sa svim parametrima.
+
+## Fiksna visina tabele
+
+```css
+.leads-table-wrapper {
+  max-height: calc(100vh - 380px);  /* fallback: 70vh na manjim ekranima */
+  overflow-y: auto;
+  overflow-x: auto;
 }
-
-// u sendMail()
-attachments: input.attachments?.map(a => ({
-  filename: a.filename,
-  path: a.path,
-})),
+.leads-table-wrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: hsl(var(--card));  /* da ne prosijava */
+}
 ```
 
-## Bezbednost
+Sticky header zadržava vidljivost kolona dok korisnik skroluje vertikalno.
 
-- Upload validira MIME i size pre čuvanja
-- MIME po content-type header-u (ne po ekstenziji — može se falsifikovati)
-- File path NE dolazi od korisnika — uvek se generiše `<sha256>.<ext>` iz content-a
-- `originalName` se čuva samo za prikaz u UI, ne koristi se za slanje
-- Send logika koristi isključivo DB-čuvane path-ove
+## M3 + last email subqueries
 
-## Testiranje
+Dodati u SELECT:
 
-- Upload PDF → pojavi se u `/attachments`
-- Dodaj na template → vidi se u template edit formi
-- Draft iz tog template-a → "nasleđeno" + broj attachment-a
-- Override na draft → vidi se custom
-- Pošalji test email → attachment stiže u inbox
-- Bulk delete template → cascade briše template_attachments
-- Obriši attachment koji se koristi → 409 error
-- Backup skripta → tar attachments + restore
+```sql
+(SELECT overall_score FROM site_analysis 
+ WHERE lead_id = leads.id ORDER BY analyzed_at DESC LIMIT 1) AS m3_overall,
 
-## Nije u scope-u (za sledeći put)
+(SELECT seo_score FROM site_analysis 
+ WHERE lead_id = leads.id ORDER BY analyzed_at DESC LIMIT 1) AS m3_seo,
 
-- Inline slike u telu emaila (CID attachments)
-- Attachment-i iz URL-a (npr. logo sa CDN-a)
-- Cloud storage (S3) za attachment preko 50MB
-- Antivirus/MIME validacija (Content-Type po header-u je bazična)
-- Auto-cleanup orphaned attachment-a (purgeUnused helper u lib, ali UI nije u v1)
+(SELECT status FROM email_sends 
+ WHERE lead_id = leads.id ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1) AS last_email_status,
+
+(SELECT COALESCE(sent_at, queued_at, created_at) FROM email_sends 
+ WHERE lead_id = leads.id ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1) AS last_email_at
+```
+
+Postojeći CASE za `has_screenshot` se zamenjuje LEFT JOIN sa `screenshots` + DISTINCT ili ostaje kao EXISTS subquery (radi OK).
+
+## Verifikacija
+
+- typecheck (`npm run typecheck`)
+- build (`npm run build`)
+- Ručno: otvoriti `/leads` u browser-u, testirati:
+  - Svaki filter radi samostalno
+  - Kombinacija filtera radi
+  - Sort klik + shift+click
+  - Multi-sort URL se čuva
+  - Tabela ima sticky header i fiksnu visinu
+  - Tabela skroluje unutar sebe, ne ceo page
+
+## Nije u scope-u
+
+- Inline editovanje (klik na ćeliju → input) — zaseban feature
+- Export filterovanih rezultata (CSV) — već postoji bulk, može se dograditi
+- Saved views / bookmark filter kombinacija
+- Bulk akcije u novoj tabeli (već rade preko bulk endpointa)

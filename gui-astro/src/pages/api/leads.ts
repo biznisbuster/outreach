@@ -1,81 +1,84 @@
 /**
- * GET /api/leads — list leads (filter, paginate).
+ * GET /api/leads — list leads (napredan filter, multi-sort, paginacija).
  * POST /api/leads — create lead (manual).
  */
 import type { APIRoute } from "astro";
 import { getDb, schema, ok, bad, qpInt } from "../../lib/api";
-import { eq, and, sql, isNull, desc, asc } from "drizzle-orm";
+import { and, eq, sql, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { dedupKey, normalizePhoneE164, normalizeWebsite } from "../../lib/dedup";
 import { logAudit } from "../../lib/audit";
+import {
+  parseSort,
+  parseFilters,
+  buildWhere,
+  buildOrderBy,
+} from "../../lib/leads-query";
 
 export const GET: APIRoute = async ({ url }) => {
   const db = getDb();
-
-  const campaignId = url.searchParams.get("campaignId");
-  const statusId = url.searchParams.get("statusId");
-  const search = url.searchParams.get("search")?.trim();
-  const hasEmail = url.searchParams.get("hasEmail");
-  const noWebsite = url.searchParams.get("noWebsite");
-  const hasPhone = url.searchParams.get("hasPhone");
-  const hasScreenshot = url.searchParams.get("hasScreenshot");
-  const city = url.searchParams.get("city");
-  const dnc = url.searchParams.get("dnc");
+  const filters = parseFilters(url.searchParams);
+  const where = buildWhere(filters);
+  const sorts = parseSort(url.searchParams.get("sort"));
+  const orderBy = buildOrderBy(sorts);
   const page = qpInt(url.searchParams.get("page"), 1);
-  const pageSize = Math.min(qpInt(url.searchParams.get("pageSize"), 50), 500);
-  const sortBy = url.searchParams.get("sortBy") || "createdAt";
-  const sortDir = url.searchParams.get("sortDir") === "asc" ? "asc" : "desc";
-
-  const conds: ReturnType<typeof eq>[] = [];
-  if (campaignId) conds.push(eq(schema.leads.campaignId, Number(campaignId)));
-  if (statusId && statusId !== "null") conds.push(eq(schema.leads.statusId, Number(statusId)));
-  if (statusId === "null") conds.push(isNull(schema.leads.statusId));
-  if (hasEmail === "1") conds.push(sql`${schema.leads.email} IS NOT NULL AND ${schema.leads.email} != ''`);
-  if (noWebsite === "1") conds.push(isNull(schema.leads.websiteNormalized));
-  if (hasPhone === "1") conds.push(sql`${schema.leads.phoneE164} IS NOT NULL AND ${schema.leads.phoneE164} != ''`);
-  if (hasScreenshot === "1") conds.push(sql`EXISTS (SELECT 1 FROM screenshots s WHERE s.lead_id = ${schema.leads.id})`);
-  if (city) conds.push(eq(schema.leads.city, city));
-  if (dnc === "1") conds.push(eq(schema.leads.doNotContact, true));
-  if (dnc === "0") conds.push(eq(schema.leads.doNotContact, false));
-  if (search) {
-    const s = `%${search}%`;
-    conds.push(
-      sql`(lower(${schema.leads.name}) LIKE lower(${s}) OR lower(coalesce(${schema.leads.email},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.websiteNormalized},'')) LIKE lower(${s}) OR lower(coalesce(${schema.leads.city},'')) LIKE lower(${s}))`,
-    );
-  }
-
-  const where = conds.length ? and(...conds) : undefined;
-
-  const sortCol =
-    sortBy === "name"
-      ? schema.leads.name
-      : sortBy === "googleRating"
-        ? schema.leads.googleRating
-        : sortBy === "updatedAt"
-          ? schema.leads.updatedAt
-          : schema.leads.createdAt;
-  const orderBy = sortDir === "asc" ? asc(sortCol) : desc(sortCol);
-
+  const pageSize = Math.min(qpInt(url.searchParams.get("pageSize"), 100), 500);
   const offset = (page - 1) * pageSize;
-  const rows = db
+
+  const baseSelect = db
     .select({
-      lead: schema.leads,
+      // Lead
+      id: schema.leads.id,
+      name: schema.leads.name,
+      category: schema.leads.category,
+      phoneRaw: schema.leads.phoneRaw,
+      phoneE164: schema.leads.phoneE164,
+      email: schema.leads.email,
+      websiteRaw: schema.leads.websiteRaw,
+      websiteNormalized: schema.leads.websiteNormalized,
+      address: schema.leads.address,
+      city: schema.leads.city,
+      postalCode: schema.leads.postalCode,
+      googleRating: schema.leads.googleRating,
+      reviewsCount: schema.leads.reviewsCount,
+      source: schema.leads.source,
+      sourceUrl: schema.leads.sourceUrl,
+      lat: schema.leads.lat,
+      lng: schema.leads.lng,
+      statusId: schema.leads.statusId,
+      doNotContact: schema.leads.doNotContact,
+      dedupKey: schema.leads.dedupKey,
+      importedAt: schema.leads.importedAt,
+      importBatchId: schema.leads.importBatchId,
+      createdAt: schema.leads.createdAt,
+      updatedAt: schema.leads.updatedAt,
+      campaignId: schema.leads.campaignId,
+      // Joins
       statusName: schema.statuses.name,
       statusColor: schema.statuses.color,
+      campaignName: schema.campaigns.name,
       hasScreenshot: sql<number>`CASE WHEN EXISTS (SELECT 1 FROM screenshots s WHERE s.lead_id = ${schema.leads.id}) THEN 1 ELSE 0 END`,
+      // Subqueries (isti izrazi kao u WHERE/order)
+      m3Overall: sql<number | null>`(SELECT overall_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+      m3Seo: sql<number | null>`(SELECT seo_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+      m3Visual: sql<number | null>`(SELECT visual_score FROM site_analysis WHERE lead_id = ${schema.leads.id} ORDER BY analyzed_at DESC LIMIT 1)`,
+      lastEmailStatus: sql<string | null>`(SELECT status FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1)`,
+      lastEmailAt: sql<number | null>`(SELECT COALESCE(sent_at, queued_at, created_at) FROM email_sends WHERE lead_id = ${schema.leads.id} ORDER BY COALESCE(sent_at, queued_at, created_at) DESC LIMIT 1)`,
     })
     .from(schema.leads)
-    .leftJoin(schema.statuses, eq(schema.leads.statusId, schema.statuses.id))
-    .where(where)
-    .orderBy(orderBy)
-    .limit(pageSize)
-    .offset(offset)
-    .all();
+    .leftJoin(schema.statuses, eq(schema.statuses.id, schema.leads.statusId))
+    .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.leads.campaignId))
+    .where(where);
+
+  const rows = orderBy.length > 0
+    ? baseSelect.orderBy(...orderBy).limit(pageSize).offset(offset).all()
+    : baseSelect.orderBy(desc(schema.leads.createdAt)).limit(pageSize).offset(offset).all();
 
   const total = Number(
     db.select({ c: sql<number>`count(*)` }).from(schema.leads).where(where).all()[0]?.c ?? 0,
   );
 
+  // Distinct gradovi + kategorije (za filter dropdown-e)
   const cities = db
     .select({ city: schema.leads.city })
     .from(schema.leads)
@@ -86,13 +89,25 @@ export const GET: APIRoute = async ({ url }) => {
     .map((r) => r.city)
     .filter(Boolean) as string[];
 
+  const categories = db
+    .select({ category: schema.leads.category })
+    .from(schema.leads)
+    .where(sql`${schema.leads.category} IS NOT NULL`)
+    .groupBy(schema.leads.category)
+    .orderBy(asc(schema.leads.category))
+    .all()
+    .map((r) => r.category)
+    .filter(Boolean) as string[];
+
   return ok({
     items: rows,
     total,
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    sort: sorts,
     cities,
+    categories,
   });
 };
 

@@ -103,6 +103,17 @@ def insert_screenshot(lead_id: int, path: str):
     conn.commit()
 
 
+def get_latest_screenshot(lead_id: int) -> dict | None:
+    """Return the most recent screenshot row for a lead, or None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, lead_id, path, captured_at FROM screenshots "
+        "WHERE lead_id = ? ORDER BY id DESC LIMIT 1",
+        (lead_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 # ---------------------------------------------------------------------------
 # site_audits + site_audit_metrics — produced by the audit/ package.
 # ---------------------------------------------------------------------------
