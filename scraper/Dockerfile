@@ -49,6 +49,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 
+# Instaliraj Playwright Chromium browser (~170MB, potrebno za screenshot).
+# PLAYWRIGHT_BROWSERS_PATH=/ms-playwright je default, ali eksplicitno ga
+# postavljamo radi konzistentnosti sa scraper-leads image-om.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN --mount=type=cache,target=/root/.cache/ms-playwright,sharing=locked \
+    playwright install chromium
+
 # Samo kod
 COPY app ./app
 

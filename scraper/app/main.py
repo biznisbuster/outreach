@@ -157,6 +157,24 @@ def run_scrape_job(job_id: str, lead_id: int, max_pages: int):
     )
     print(f"[scrape] job {job_id} gotov: {len(pages_data)} strana, screenshot={bool(screenshot_path)}")
 
+    # 5) automatski audit — pokreni posle uspešnog scrape-a.
+    # Site audit koristi poslednji uspešan scrape da izračuna multi-criteria
+    # 0-100 ranking sajta. Može da traje 30-90s (re-fetch svake stranice).
+    if len(pages_data) > 0:
+        try:
+            print(f"[scrape] pokrećem automatski audit za lead_id={lead_id}...")
+            audit_report = audit_runner.run_audit(lead_id)
+            # audit_report dict sadrži 'overall_rank' (0-100), ne 'score'
+            rank = audit_report.get('overall_rank', audit_report.get('score', 'n/a'))
+            print(f"[scrape] audit završen: rank={rank}")
+        except Exception as e:
+            # Audit ne treba da blokira scrape — samo loguj
+            print(f"[scrape] audit greška (nije fatalno): {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"[scrape] nema scraped strana, preskačem audit")
+
 
 @app.get("/")
 async def root():
