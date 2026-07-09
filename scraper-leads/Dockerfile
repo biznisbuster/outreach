@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Copy project files
-COPY pyproject.toml uv.lock ./
+# README.md je obavezan jer pyproject.toml ima `readme = "README.md"`
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY scripts ./scripts
 
