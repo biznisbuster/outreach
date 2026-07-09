@@ -37,8 +37,9 @@ function colLabel(key: string): string {
   return c?.label ?? key;
 }
 
+// SSR-safe URL builder — koristi Astro.url (server) umesto location (browser only)
 function buildSortUrl(entries: Array<{ key: string; dir: "asc" | "desc" }>) {
-  const params = new URLSearchParams(location.search);
+  const params = new URLSearchParams(Astro.url.search);
   if (entries.length === 0) {
     params.delete("sort");
   } else {
