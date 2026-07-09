@@ -45,9 +45,9 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0
 
-# Runtime libs za better-sqlite3
+# Runtime libs za better-sqlite3 + wget (za Docker healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 \
+    libstdc++6 wget \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/package.json ./

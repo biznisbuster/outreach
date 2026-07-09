@@ -37,13 +37,24 @@ mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 # 1. SQLite online backup (WAL-safe, čak i dok gui-astro piše).
 DAILY="$BACKUP_DIR/daily/outreach-$TODAY.db"
 
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  err "sqlite3 CLI nije instaliran. apt install sqlite3 (ili apk add sqlite)."
-  exit 2
-fi
-
 log "DB backup → $DAILY"
-sqlite3 "$DB" ".backup '$DAILY'"
+if command -v sqlite3 >/dev/null 2>&1; then
+    # Preferirani put: sqlite3 CLI
+    sqlite3 "$DB" ".backup '$DAILY'"
+elif command -v python3 >/dev/null 2>&1; then
+    # Fallback: python3 sqlite3 (skoro uvek dostupan)
+    python3 - "$DB" "$DAILY" <<'PYEOF'
+import sqlite3, sys
+src = sqlite3.connect(sys.argv[1])
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+dst.close()
+src.close()
+PYEOF
+else
+    err "Nema ni sqlite3 CLI ni python3. Instaliraj jedan od njih (apt install sqlite3)."
+    exit 2
+fi
 gzip "$DAILY"
 log "  ✓ $(basename "$DAILY").gz ($(du -h "$DAILY.gz" | cut -f1))"
 
