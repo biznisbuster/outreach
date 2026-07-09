@@ -16,6 +16,8 @@ export interface SendInput {
   unsubscribeUrl?: string;
   // ID za tracking
   emailSendId: number;
+  // attachment-i (opciono). Svaki ima filename (user-facing) i path (apsolutni).
+  attachments?: { filename: string; path: string }[];
 }
 
 export interface SendResult {
@@ -65,6 +67,10 @@ export async function sendEmail(input: SendInput): Promise<SendResult> {
       text,
       replyTo: input.replyTo || input.fromEmail,
       headers: headerPairs,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        path: a.path,
+      })),
     })) as { messageId?: string };
     return { ok: true, messageId: info.messageId };
   } catch (e: unknown) {

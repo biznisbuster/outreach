@@ -1,0 +1,241 @@
+---
+/**
+ * /attachments — globalna biblioteka email attachment-a.
+ *
+ * - Drag&drop ili klik → file picker
+ * - Upload → validacija (size, MIME) → dedup po sha256 → sačuvano
+ * - Tabela sa svim attachment-ima + download/delete
+ * - Usage info (koliko template-a / draft-ova koristi)
+ */
+import AppLayout from "../layouts/AppLayout.astro";
+import Card from "../components/Card.astro";
+import CardContent from "../components/CardContent.astro";
+import CardHeader from "../components/CardHeader.astro";
+import CardTitle from "../components/CardTitle.astro";
+import { getDb, schema } from "../lib/db";
+import { desc } from "drizzle-orm";
+import { getAttachmentUsage } from "../lib/attachments";
+import { getSetting } from "../lib/settings";
+
+const db = getDb();
+const ok = Astro.url.searchParams.get("ok");
+const error = Astro.url.searchParams.get("error");
+
+const rows = db.select().from(schema.attachments).orderBy(desc(schema.attachments.id)).all();
+const items = rows.map((r) => {
+  const u = getAttachmentUsage(r.id);
+  return { ...r, usedByTemplates: u.usedByTemplates, usedByDrafts: u.usedByDrafts };
+});
+
+const maxSizeMb = getSetting("attachment_max_size_mb");
+const allowedMime = getSetting("attachment_allowed_mime");
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function mimeBadge(mime: string): string {
+  if (mime === "application/pdf") return "PDF";
+  if (mime.startsWith("image/")) return mime.replace("image/", "").toUpperCase();
+  return mime;
+}
+---
+<AppLayout title="Attachments — Outreach">
+  <div>
+    <div class="border-b px-6 py-4">
+      <h1 class="text-xl font-bold tracking-tight">Attachments</h1>
+      <p class="text-sm text-muted-foreground">
+        Globalna biblioteka email attachment-a. Max {maxSizeMb}MB · Dozvoljeni: {allowedMime}
+      </p>
+    </div>
+
+    <div class="space-y-6 p-6">
+      {ok ? (
+        <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">{ok}</div>
+      ) : null}
+      {error ? (
+        <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">{error}</div>
+      ) : null}
+
+      <!-- Upload zona -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base">Upload novog attachment-a</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form id="upload-form" class="space-y-3">
+            <label
+              id="dropzone"
+              class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 px-6 py-10 text-center transition-colors hover:bg-muted/50"
+            >
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-2 text-muted-foreground">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span class="text-sm font-medium">Klikni ili prevuci fajl ovde</span>
+              <span class="mt-1 text-xs text-muted-foreground">PDF ili slika (JPG, PNG, WebP) · max {maxSizeMb}MB</span>
+              <input id="file-input" name="file" type="file" class="hidden" accept=".pdf,image/jpeg,image/png,image/webp" />
+            </label>
+            <div id="upload-status" class="hidden text-sm"></div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <!-- Lista attachment-a -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2 text-base">
+            <span>Biblioteka</span>
+            <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">{items.length}</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {items.length === 0 ? (
+            <div class="py-12 text-center text-muted-foreground">
+              Nema attachment-a. Upload-uj prvi iznad.
+            </div>
+          ) : (
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th class="px-3 py-2">Ime</th>
+                    <th class="px-3 py-2">Tip</th>
+                    <th class="px-3 py-2">Veličina</th>
+                    <th class="px-3 py-2">Upotreba</th>
+                    <th class="px-3 py-2">Upload</th>
+                    <th class="px-3 py-2 text-right">Akcije</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((a) => (
+                    <tr class="border-b last:border-b-0 hover:bg-muted/30">
+                      <td class="px-3 py-2 font-medium">{a.originalName}</td>
+                      <td class="px-3 py-2"><span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold">{mimeBadge(a.mimeType)}</span></td>
+                      <td class="px-3 py-2 text-xs text-muted-foreground">{formatSize(a.size)}</td>
+                      <td class="px-3 py-2 text-xs text-muted-foreground">
+                        {a.usedByTemplates + a.usedByDrafts > 0 ? (
+                          <span>
+                            {a.usedByTemplates > 0 ? `${a.usedByTemplates} tmpl` : ""}
+                            {a.usedByTemplates > 0 && a.usedByDrafts > 0 ? " · " : ""}
+                            {a.usedByDrafts > 0 ? `${a.usedByDrafts} draft` : ""}
+                          </span>
+                        ) : (
+                          <span class="italic">nekoristi se</span>
+                        )}
+                      </td>
+                      <td class="px-3 py-2 text-xs text-muted-foreground">
+                        {new Date(a.uploadedAt as unknown as number).toLocaleDateString("sr-RS")}
+                      </td>
+                      <td class="px-3 py-2 text-right">
+                        <div class="inline-flex gap-2">
+                          <a href={`/api/attachments/${a.id}/file`} target="_blank" rel="noopener" class="inline-flex h-7 items-center rounded-md border border-input bg-transparent px-2 text-xs font-medium hover:bg-accent">
+                            Otvori
+                          </a>
+                          <button
+                            type="button"
+                            data-delete-id={a.id}
+                            data-usage={`${a.usedByTemplates} tmpl, ${a.usedByDrafts} draft`}
+                            class="inline-flex h-7 items-center rounded-md border border-red-200 bg-transparent px-2 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/30 disabled:opacity-50"
+                            disabled={a.usedByTemplates + a.usedByDrafts > 0}
+                            title={a.usedByTemplates + a.usedByDrafts > 0 ? "Prvo odveži od template/draft-ova" : "Obriši"}
+                          >
+                            Obriši
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+</AppLayout>
+
+<script is:inline>
+  (function () {
+    var dropzone = document.getElementById("dropzone");
+    var fileInput = document.getElementById("file-input");
+    var status = document.getElementById("upload-status");
+
+    function showStatus(msg, ok) {
+      if (!status) return;
+      status.textContent = msg;
+      status.className = "rounded-md px-3 py-2 text-sm " + (ok ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300" : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300");
+      status.classList.remove("hidden");
+    }
+
+    async function uploadFile(file) {
+      if (!file) return;
+      status && status.classList.add("hidden");
+      var fd = new FormData();
+      fd.append("file", file);
+      try {
+        var res = await fetch("/api/attachments", { method: "POST", body: fd });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) {
+          showStatus((data && data.error) || ("HTTP " + res.status), false);
+          return;
+        }
+        var msg = data.reused ? "Već postoji (dedup): " : "Upload OK: ";
+        showStatus(msg + (data.originalName || file.name), true);
+        // Reload posle 600ms da korisnik vidi poruku
+        setTimeout(function () { location.reload(); }, 600);
+      } catch (e) {
+        showStatus("Network greška: " + (e && e.message ? e.message : String(e)), false);
+      }
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener("change", function () {
+        if (fileInput.files && fileInput.files[0]) uploadFile(fileInput.files[0]);
+      });
+    }
+
+    if (dropzone) {
+      ["dragenter", "dragover"].forEach(function (ev) {
+        dropzone.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.add("border-primary", "bg-primary/5");
+        });
+      });
+      ["dragleave", "drop"].forEach(function (ev) {
+        dropzone.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.remove("border-primary", "bg-primary/5");
+        });
+      });
+      dropzone.addEventListener("drop", function (e) {
+        var dt = e.dataTransfer;
+        if (dt && dt.files && dt.files[0]) uploadFile(dt.files[0]);
+      });
+    }
+
+    // Delete dugmad
+    document.querySelectorAll("[data-delete-id]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        var id = btn.getAttribute("data-delete-id");
+        var usage = btn.getAttribute("data-usage");
+        var msg = "Obriši attachment #" + id + "?";
+        if (usage && usage !== "0 tmpl, 0 draft") {
+          msg += "\n\nKoristi se: " + usage + ". Prvo odveži.";
+        }
+        if (!confirm(msg)) return;
+        var res = await fetch("/api/attachments/" + id, { method: "DELETE" });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) {
+          alert((data && data.error) || ("HTTP " + res.status));
+          return;
+        }
+        location.reload();
+      });
+    });
+  })();
+</script>

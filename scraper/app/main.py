@@ -18,6 +18,7 @@ from .page_scraper import scrape_page
 from .categorize import filter_pages
 from .screenshot import capture_screenshot
 from .jobs import create_job, get_job, update_job, job_to_dict
+from .audit import runner as audit_runner
 
 MAX_PAGES = int(os.environ.get("MAX_PAGES_PER_LEAD", "30"))
 SCREENSHOTS_DIR = os.environ.get("SCREENSHOTS_DIR", "/data/screenshots")
@@ -158,4 +159,48 @@ def run_scrape_job(job_id: str, lead_id: int, max_pages: int):
 
 @app.get("/")
 async def root():
-    return {"service": "outreach-scraper", "endpoints": ["/health", "/scrape", "/scrape/bulk", "/scrape/status/{job_id}"]}
+    return {"service": "outreach-scraper", "endpoints": ["/health", "/scrape", "/scrape/bulk", "/scrape/status/{job_id}", "/audit/{lead_id}", "/audit/{lead_id}/latest", "/audit/by-id/{audit_id}"]}
+
+
+# ============================================================================
+# Site audit endpoints — POST /audit/{lead_id}, GET /audit/{lead_id}/latest,
+#                          GET /audit/by-id/{audit_id}
+#
+# The audit consumes the most-recent successful site_scrapes row for the lead
+# and re-fetches each URL to produce a multi-criteria 0-100 site ranking.
+# ============================================================================
+
+@app.post("/audit/{lead_id}")
+async def audit_site(lead_id: int, bg: BackgroundTasks):
+    """Re-fetch and audit the lead's website synchronously (or in background if you really must).
+
+    Returns 503 if no successful scrape exists yet — client should call
+    /scrape first.
+    """
+    try:
+        report = audit_runner.run_audit(lead_id)
+    except ValueError as e:
+        return {"error": str(e)}, 404
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"audit failed: {e}"}, 500
+    return report
+
+
+@app.get("/audit/{lead_id}/latest")
+async def audit_latest(lead_id: int):
+    """Return the most recent stored audit for a lead."""
+    r = db.get_latest_audit_for_lead(lead_id)
+    if not r:
+        return {"error": "no audit found for this lead; POST /audit/{lead_id} first"}, 404
+    return r
+
+
+@app.get("/audit/by-id/{audit_id}")
+async def audit_by_id(audit_id: int):
+    """Return an audit by its row id."""
+    r = db.get_audit_by_id(audit_id)
+    if not r:
+        return {"error": "audit not found"}, 404
+    return r

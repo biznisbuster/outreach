@@ -298,6 +298,60 @@ Sva podešavanja su u `gui-astro/src/lib/settings.ts` (`SETTINGS_CATALOG`) — d
 - Output: CSV + auto-import u `leads` tabelu
 - Enrich: fuzzy Google Maps lookup po imenu za postojeće leadove (SequenceMatcher, threshold 0.45)
 
+## Email attachments
+
+PDF ponude, slike i drugi fajlovi koji se šalju uz email. **Template** može imati default attachment-e; **draft** može da ih override-uje.
+
+### Arhitektura
+
+```
+[Browser] /attachments stranica
+  ├─ drag&drop upload → POST /api/attachments (multipart)
+  ├─ server validira (size, MIME) → SHA-256 → dedup ako već postoji
+  ├─ čuva fajl na ~/outreach-data/attachments/<sha256>.<ext>
+  └─ INSERT u `attachments` (id, original_name, mime, size, sha256)
+
+[Browser] /templates editor
+  └─ "Dodaj attachment" dropdown → bira iz biblioteke → INSERT u template_attachments
+
+[Browser] queue/draft editor (TODO)
+  └─ Override dugme → POST /api/email/drafts/<id>/attachments
+
+[Scheduler] processQueue() pre slanja:
+  1. Ako draft ima email_send_attachments → koristi SAMO njih (override)
+  2. Inače ako email ima prompt_template_id → template_attachments
+  3. Inače → []
+  → nodemailer attachments: [{ filename, path }]
+```
+
+### Podešavanja
+
+`/settings` → grupa **Email attachments**:
+
+- `attachment_max_size_mb` (default 10) — max veličina po fajlu
+- `attachment_allowed_mime` (default `application/pdf,image/jpeg,image/png,image/webp`) — comma-separated MIME lista
+
+### Storage
+
+- Fajlovi na hostu: `~/outreach-data/attachments/<sha256>.<ext>`
+- Container path: `/data/attachments/<sha256>.<ext>` (kroz postojeći mount)
+- **Dedup po SHA-256** — isti sadržaj se ne čuva dva puta (upload istog PDF-a → vrati postojeći ID)
+- Backup skripta automatski tar-uje `attachments/` zajedno sa DB-om
+
+### API
+
+| Endpoint | Svrha |
+|---|---|
+| `POST /api/attachments` | Upload (multipart/form-data, polje `file`) |
+| `GET /api/attachments` | List sa usage info |
+| `GET /api/attachments/:id/file` | Download/preview binarno |
+| `DELETE /api/attachments/:id` | Obriši (ako nije vezan ni za jedan template/draft) |
+| `POST /api/templates/:id/attachments` | Veži na template |
+| `DELETE /api/templates/:id/attachments` | Odveži sa template |
+| `GET /api/templates/:id/attachments` | List template attachments |
+| `POST /api/email/drafts/:id/attachments` | Override draft attachments |
+| `DELETE /api/email/drafts/:id/attachments` | Ukloni override (vrati na template default) |
+
 ## Slanje emaila
 
 `gui-astro/src/lib/workers/scheduler.ts` → `processQueue()`:

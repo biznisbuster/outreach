@@ -1,4 +1,12 @@
 ---
+/**
+ * /templates — šabloni (prompt templates) + attachment editor.
+ *
+ * Svaki template može imati 1+ default attachment-a koji se šalju uz
+ * svaki draft iz tog template-a (osim ako draft ima svoj override).
+ *
+ * UI: inline prikaz attachment liste + dodaj/ukloni + preview.
+ */
 import AppLayout from "../layouts/AppLayout.astro";
 import Card from "../components/Card.astro";
 import CardContent from "../components/CardContent.astro";
@@ -6,6 +14,11 @@ import CardHeader from "../components/CardHeader.astro";
 import CardTitle from "../components/CardTitle.astro";
 import { getDb, schema } from "../lib/db";
 import { asc, eq } from "drizzle-orm";
+import {
+  listTemplateAttachments,
+  attachToTemplate,
+  detachFromTemplate,
+} from "../lib/attachments";
 
 const db = getDb();
 const ok = Astro.url.searchParams.get("ok");
@@ -37,20 +50,55 @@ if (Astro.request.method === "POST") {
     db.delete(schema.promptTemplates).where(eq(schema.promptTemplates.id, id)).run();
     return Astro.redirect("/templates?ok=Obrisan", 303);
   }
+  if (op === "attach") {
+    const tid = Number(form.get("template_id"));
+    const aid = Number(form.get("attachment_id"));
+    if (Number.isFinite(tid) && Number.isFinite(aid)) {
+      attachToTemplate(tid, aid);
+      return Astro.redirect("/templates?ok=Dodat", 303);
+    }
+    return Astro.redirect("/templates?error=Neispravan+ID", 303);
+  }
+  if (op === "detach") {
+    const tid = Number(form.get("template_id"));
+    const aid = Number(form.get("attachment_id"));
+    if (Number.isFinite(tid) && Number.isFinite(aid)) {
+      detachFromTemplate(tid, aid);
+      return Astro.redirect("/templates?ok=Uklonjen", 303);
+    }
+    return Astro.redirect("/templates?error=Neispravan+ID", 303);
+  }
 }
 
 const items = db.select().from(schema.promptTemplates).orderBy(asc(schema.promptTemplates.id)).all();
+// Svi attachment-i za globalni picker
+const allAttachments = db
+  .select({
+    id: schema.attachments.id,
+    originalName: schema.attachments.originalName,
+    mimeType: schema.attachments.mimeType,
+    size: schema.attachments.size,
+  })
+  .from(schema.attachments)
+  .orderBy(asc(schema.attachments.originalName))
+  .all();
+
+function formatSize(b: number): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(2)} MB`;
+}
 ---
 <AppLayout title="Šabloni — Outreach">
   <div>
     <div class="border-b px-6 py-4">
       <h1 class="text-xl font-bold tracking-tight">Šabloni</h1>
-      <p class="text-sm text-muted-foreground">Tekstualni šabloni za ručno pisanje emailova. AI generisanje je uklonjeno u v2.</p>
+      <p class="text-sm text-muted-foreground">Tekstualni šabloni za ručno pisanje emailova. Svaki šablon može imati default attachment-e.</p>
     </div>
 
     <div class="space-y-6 p-6">
-      {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</div>}
-      {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {ok && <div class="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">{ok}</div>}
+      {error && <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">{error}</div>}
 
       <Card class="max-w-3xl">
         <CardHeader>
@@ -60,7 +108,7 @@ const items = db.select().from(schema.promptTemplates).orderBy(asc(schema.prompt
           <form method="POST" class="space-y-3">
             <input type="hidden" name="op" value="create" />
             <input name="name" required placeholder="Naziv šablona" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm" />
-            <textarea name="body" required rows="6" placeholder="Telo šablona (subject + tekst)… možeš koristiti {{firstName}}, {{companyName}} kao placeholder-e." class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"></textarea>
+            <textarea name="body" required rows="6" placeholder="Telo šablona…" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"></textarea>
             <div class="flex justify-end">
               <button class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Dodaj</button>
             </div>
@@ -75,29 +123,86 @@ const items = db.select().from(schema.promptTemplates).orderBy(asc(schema.prompt
               Nema šablona. Dodaj prvi iznad.
             </CardContent>
           </Card>
-        ) : items.map((t) => (
-          <Card>
-            <CardContent class="pt-6">
-              <form method="POST" class="space-y-2">
-                <input type="hidden" name="op" value="update" />
-                <input type="hidden" name="id" value={String(t.id)} />
-                <input name="name" value={t.name} required class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-medium" />
-                <textarea name="body" required rows="6" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs">{t.body}</textarea>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs text-muted-foreground">id={t.id} · {t.isDefault ? "default" : "custom"}</span>
-                  <div class="flex gap-2">
-                    <button class="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">Sačuvaj</button>
+        ) : items.map((t) => {
+          const tmplAtts = listTemplateAttachments(t.id);
+          return (
+            <Card>
+              <CardContent class="pt-6 space-y-3">
+                <form method="POST" class="space-y-2">
+                  <input type="hidden" name="op" value="update" />
+                  <input type="hidden" name="id" value={String(t.id)} />
+                  <input name="name" value={t.name} required class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-medium" />
+                  <textarea name="body" required rows="6" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs">{t.body}</textarea>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs text-muted-foreground">id={t.id} · {t.isDefault ? "default" : "custom"}</span>
+                    <div class="flex gap-2">
+                      <button class="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">Sačuvaj</button>
+                    </div>
+                  </div>
+                </form>
+
+                <!-- Attachment editor -->
+                <div class="border-t pt-3">
+                  <div class="mb-2 flex items-center justify-between">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Attachment-i ({tmplAtts.length})
+                    </span>
+                    <details class="relative">
+                      <summary class="inline-flex h-7 cursor-pointer items-center rounded-md border border-input bg-transparent px-2 text-xs font-medium hover:bg-accent">
+                        + Dodaj
+                      </summary>
+                      <div class="absolute right-0 top-full z-10 mt-1 max-h-72 w-80 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg">
+                        {allAttachments.length === 0 ? (
+                          <div class="px-3 py-4 text-center text-xs text-muted-foreground">
+                            Nema attachment-a. <a href="/attachments" class="text-primary underline">Upload-uj prvo</a>.
+                          </div>
+                        ) : (
+                          allAttachments.map((a) => (
+                            <form method="POST" class="block">
+                              <input type="hidden" name="op" value="attach" />
+                              <input type="hidden" name="template_id" value={String(t.id)} />
+                              <input type="hidden" name="attachment_id" value={String(a.id)} />
+                              <button type="submit" class="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent">
+                                <span class="truncate">{a.originalName}</span>
+                                <span class="shrink-0 text-[10px] text-muted-foreground">{formatSize(a.size)}</span>
+                              </button>
+                            </form>
+                          ))
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                  {tmplAtts.length === 0 ? (
+                    <p class="text-xs italic text-muted-foreground">Nema attachment-a. Dodaj iz biblioteke (📎 Attachments).</p>
+                  ) : (
+                    <ul class="space-y-1">
+                      {tmplAtts.map((a) => (
+                        <li class="flex items-center justify-between gap-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs">
+                          <a href={`/api/attachments/${a.id}/file`} target="_blank" rel="noopener" class="flex min-w-0 items-center gap-2 hover:underline">
+                            <span class="rounded bg-muted px-1 py-0.5 text-[9px] font-semibold">{a.mimeType === "application/pdf" ? "PDF" : a.mimeType.replace("image/", "").toUpperCase()}</span>
+                            <span class="truncate">{a.originalName}</span>
+                          </a>
+                          <form method="POST" class="shrink-0">
+                            <input type="hidden" name="op" value="detach" />
+                            <input type="hidden" name="template_id" value={String(t.id)} />
+                            <input type="hidden" name="attachment_id" value={String(a.id)} />
+                            <button type="submit" class="text-red-600 hover:underline">×</button>
+                          </form>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                </div>
-              </form>
-              <form method="POST" class="mt-2 text-right">
-                <input type="hidden" name="op" value="delete" />
-                <input type="hidden" name="id" value={String(t.id)} />
-                <button class="text-xs text-red-600 hover:underline">Obriši</button>
-              </form>
-            </CardContent>
-          </Card>
-        ))}
+
+                <form method="POST" class="border-t pt-2 text-right">
+                  <input type="hidden" name="op" value="delete" />
+                  <input type="hidden" name="id" value={String(t.id)} />
+                  <button class="text-xs text-red-600 hover:underline">Obriši šablon</button>
+                </form>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   </div>

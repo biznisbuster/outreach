@@ -494,6 +494,39 @@ export const SETTINGS_CATALOG: Record<string, SettingDef> = {
     placeholder: "https://outreach.tvojdomen.rs",
     envHint: "UNSUBSCRIBE_BASE_URL",
   },
+
+  // ─── Email attachments ────────────────────────────────────────────────
+  // Šalju se kao MIME multipart nodemailer-om. Storage: ~/outreach-data/attachments/.
+  // Validacija: MIME tip mora biti u attachment_allowed_mime, size <= attachment_max_size_mb.
+  attachment_max_size_mb: {
+    key: "attachment_max_size_mb",
+    defaultValue: "10",
+    group: "email-attachments",
+    groupTitle: "Email attachments",
+    groupDescription:
+      "Email attachment-i (PDF ponude, slike). Fajlovi se čuvaju u ~/outreach-data/attachments/ van repo-a. Validacija se radi pre svakog upload-a.",
+    label: "Max veličina po attachment-u",
+    description:
+      "Maksimalna dozvoljena veličina jednog fajla u MB. Veći fajlovi se odbijaju sa 400 greškom pri upload-u. " +
+      "Preporuka: 10MB (Gmail limit je 25MB ukupno sa encoding headroom-om).",
+    type: "number",
+    unit: "MB",
+    min: 1,
+    max: 50,
+  },
+  attachment_allowed_mime: {
+    key: "attachment_allowed_mime",
+    defaultValue: "application/pdf,image/jpeg,image/png,image/webp",
+    group: "email-attachments",
+    groupTitle: "Email attachments",
+    groupDescription: "",
+    label: "Dozvoljeni MIME tipovi",
+    description:
+      "Comma-separated lista MIME tipova koji se prihvataju pri upload-u. " +
+      "Ostali tipovi se odbijaju sa 400. Preporuka: PDF + slike za B2B ponude.",
+    type: "text",
+    placeholder: "application/pdf,image/jpeg,image/png,image/webp",
+  },
 };
 
 type CacheEntry = { value: string; ts: number };

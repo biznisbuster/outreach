@@ -5,6 +5,7 @@ import { pickNextSender, isWithinSendWindow, canSendToLead, recentBounceRate } f
 import { signHmac } from "@/lib/crypto";
 import { getSetting, getSettingInt } from "@/lib/settings";
 import { advanceSequence } from "@/lib/email/sequence";
+import { getAttachmentsForSend } from "@/lib/attachments";
 
 let started = false;
 let interval: ReturnType<typeof setInterval> | null = null;
@@ -117,6 +118,9 @@ export async function processQueue(): Promise<{ processed: number; sent: number;
     const token = signHmac(`unsubscribe:${es.id}`);
     const unsubUrl = unsubBase ? `${unsubBase}/api/unsubscribe?id=${es.id}&token=${token}` : undefined;
 
+    // attachment-i: draft override ILI template default ILI []
+    const attachments = getAttachmentsForSend(es.id);
+
     // pošalji
     const sendRes = await sendEmail({
       host: sender.smtpHost,
@@ -130,6 +134,7 @@ export async function processQueue(): Promise<{ processed: number; sent: number;
       body: es.body,
       unsubscribeUrl: unsubUrl,
       emailSendId: es.id,
+      attachments,
     });
 
     if (sendRes.ok) {

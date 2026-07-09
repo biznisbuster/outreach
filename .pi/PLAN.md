@@ -1,7 +1,7 @@
 # redesign whole ui/ux not changing functionaility astro-gui
 
 _Generated: 2026-07-08T22:01:08.429Z_
-_Last updated: 2026-07-09T11:07:39.958Z_
+_Last updated: 2026-07-09T13:19:39.028Z_
 
 ## Context
 
@@ -32,6 +32,22 @@ Project: `/home/usrtmp/Projects/local/scrapers/gui`
 ### 6. Is there anything specific you want to keep or avoid in the redesign? Anything you'd flag as off-limits?
 
 **Answer:** 
+
+### 7. How aggressive should the audit be regarding external API dependencies? Some signals (visitor counts, top pages, traffic) really need paid APIs (SimilarWeb). The free/cheap alternatives give partial info: Tranco list gives a popularity rank (no visitor counts), and Open PageRank gives a 0-10 authority score. Which way should I lean?
+
+**Answer:** Free-only — use Tranco rank + Open PageRank + everything we can scrape from the site itself. Skip visitor counts entirely (mark as N/A in the report).
+
+### 8. Should I add the audit as a separate step (POST /audit endpoint that runs AFTER scrape completes), or merge it INTO the existing POST /scrape flow so every scrape automatically produces an audit report?
+
+**Answer:** Separate endpoint — keep POST /scrape as-is, add POST /audit/{lead_id} that consumes the latest scrape and produces an audit report. More flexible, can re-audit without re-scraping.
+
+### 9. Storage — the existing schema has site_scrapes, site_pages (with seo_metrics_json blob), screenshots, and site_analysis (a 1-10 AI score). For the audit, I want to store: (a) the full per-category metrics, (b) the weighted 0-100 site rank, (c) the verdict label. Two options:
+
+**Answer:** New tables — add site_audits (lead_id, scrape_id, overall_rank, verdict, created_at) and site_audit_metrics (audit_id, category, sub_scores_json, raw_data_json). Cleaner, allows history.
+
+### 10. UI side — should I build an Astro page (`gui-astro/src/pages/audits/[id].astro`) that renders the audit as a dashboard (per-category score cards, traffic signals, top issues, verdict banner)? Or keep this iteration pure-API and only return JSON (you can wire up the UI later)?
+
+**Answer:** API only — return the JSON report from /audit/{lead_id} and store it. You can wire up the UI yourself later.
 
 
 ## Research Notes
@@ -110,150 +126,253 @@ Constraints to preserve:
 - Inline `<script is:inline>` blocks (site scrape progress, screenshot lightbox, status create) keep working
 - No new heavy dependencies (avoid full lucide package — use existing icon strings pattern + extend)
 
+### 3. 2026-07-09T13:12:54.044Z
 
-# Settings refaktor — sidebar navigacija + DB-backed config proširenje
+Audit API endpoint decision: POST /audit/{lead_id} consumes latest site_scrapes row. Allows re-audit without re-scraping. Existing POST /scrape stays untouched. Decision captured from user 2026-07-09.
+
+Free-only traffic: Tranco (free popularity CSV) + Open PageRank (API-key gated). Visitor counts marked N/A.
+
+Schema: new tables site_audits + site_audit_metrics, added to gui-astro schema.ts. Belt-and-suspenders CREATE TABLE IF NOT EXISTS in index.ts raw.exec block.
+
+Verdict thresholds: 0-30 critical (aggressive pitch), 31-55 below_avg (strong pitch), 56-70 average (worth pitching), 71-85 good (cautious), 86-100 excellent (skip). Matches user's mental model.
+
+Scoring is pure Python — no LLM in the loop. Existing site_analysis (AI 1-10 from screenshot) stays untouched.
+
+
+
+# Email attachments — dizajn + implementacija
 
 ## Cilj
 
-1. **UI refaktor** `/settings`: dodati unutrašnji sidebar za navigaciju između
-   sekcija (kartica), svaka kartica sa opisom i grupisanim podešavanjima.
-2. **Proširenje DB-backed podešavanja**: identifikovati SVE env/hardcoded
-   vrednosti koje imaju smisla da budu u `settings` tabeli i prebaciti ih na
-   `getSetting()` pozive.
+Dozvoliti slanje email-ova sa attachment fajlovima (PDF ponude, slike…).
+Template ima default attachment; draft može da ga override-uje. Svi fajlovi
+idu kroz globalnu biblioteku.
 
-## UI refaktor — `src/pages/settings.astro`
+## Odluke (potvrđene)
 
-### Layout
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ Header: "Podešavanja"                                              │
-│ Subhead: "DB-backed runtime konfiguracija · DB > env > default"    │
-│ Banner (ok/error)                                                   │
-├──────────────────┬─────────────────────────────────────────────────┤
-│ Sticky sidebar   │ Main: kartice (jedna po grupi)                  │
-│                  │                                                  │
-│ › Slanje emaila  │ ┌──────────────────────────────────────────┐    │
-│   Bounce guard   │ │ Slanje emaila                  [badge DB]│    │
-│   Scheduler      │ │ Prozor + cap-ovi + delay + retry          │    │
-│   Scraper servisi│ └──────────────────────────────────────────┘    │
-│   IMAP           │ ┌──────────────────────────────────────────┐    │
-│   Dashboard      │ │ Bounce guard                              │    │
-│   Unsubscribe    │ └──────────────────────────────────────────┘    │
-│                  │ …                                                 │
-│                  │                                                  │
-│ [Sačuvaj sve]    │ (submit ide na dnu, van sidebara)               │
-└──────────────────┴─────────────────────────────────────────────────┘
-```
-
-### Navigacija
-
-- **Anchor linkovi** (`#email-sending`, `#bounce-guard`, itd.) — najjednostavniji.
-- `location.hash` + `hashchange` event → aktivna stavka u sidebar-u.
-- `IntersectionObserver` (opciono) → aktivna stavka prati scroll.
-- Kartice imaju `id=` (slug) anchor target.
-- Sidebar je `sticky top-0` unutar main flex kontejnera.
-- Na mobilnom: sidebar se pretvara u `select` dropdown iznad kartica
-  (proveriti `use client`/`is:inline` skripte).
-
-### Opisi
-
-Svaka kartica (grupa) ima:
-- `title` (već ima u catalogu, samo rename `group` → display)
-- `description` (šta ova grupa kontroliše, zašto je bitno)
-- Svaki setting unutar ima:
-  - `label` (već ima)
-  - `description` (šta radi, default, kada se primenjuje)
-  - `placeholder` (za prazne)
-  - `envHint` (već ima, fallback)
-  - vizuelni chip: `db` (plavi), `env` (žuti), `default` (sivi)
-  - `Reset` dugme za pojedinačni setting (poziva `clearSetting`)
-  - za `password` tip: reveal/hide toggle + `Reveal` chip ako ima vrednost
-
-### Nove grupe (7 ukupno)
-
-1. **Slanje emaila** — prozor slanja, default cap-ovi, default delay za nove sendere
-2. **Bounce guard** — prag, prozor, sample size (zasebna grupa jer je kritično)
-3. **Scheduler** — enabled, tick ms, batch size
-4. **Scraper servisi** — URL-ovi, max_pages, auto_screenshot
-5. **IMAP (reply tracking)** — host, port, user, password, folder, interval, secure
-6. **Dashboard "Za zvanje danas"** — followup prozor, no-contact prozor, limit
-7. **Unsubscribe** — base URL
-
-## Proširenje DB podešavanja
-
-### Nove stavke (dodaju se u `SETTINGS_CATALOG`)
-
-| Ključ | Default | Grupa | Zamenjuje |
-|---|---|---|---|
-| `scheduler_enabled` | `1` | Scheduler | env `SCHEDULER_ENABLED` (instrumentation.ts) |
-| `scheduler_tick_ms` | `60000` | Scheduler | env `SCHEDULER_TICK_MS` (scheduler.ts) |
-| `scheduler_batch_size` | `20` | Scheduler | hardcoded `.limit(20)` u scheduler.ts |
-| `bounce_threshold_pct` | `5` | Bounce guard | hardcoded `BOUNCE_THRESHOLD = 0.05` u scheduler.ts |
-| `bounce_window_days` | `7` | Bounce guard | hardcoded `- 7 * 24 * 3600 * 1000` u throttler.ts |
-| `bounce_sample_size` | `50` | Bounce guard | hardcoded `.limit(50)` u throttler.ts |
-| `default_min_delay_sec` | `30` | Slanje emaila | hardcoded `30` u schema.ts + senders API + senders.astro |
-| `default_max_delay_sec` | `120` | Slanje emaila | hardcoded `120` u schema.ts + senders API + senders.astro |
-| `scraper_max_pages` | `20` | Scraper servisi | hardcoded `max_pages: 20` u scraping/client.ts |
-| `imap_secure` | `1` | IMAP | hardcoded `secure: true` u imap.ts + test-imap API |
-| `dashboard_followup_window_days` | `7` | Dashboard | hardcoded `cutoff7dMs` u dashboard.ts |
-| `dashboard_followup_min_age_days` | `3` | Dashboard | hardcoded `cutoff3dMs` u dashboard.ts |
-| `dashboard_no_contact_days` | `5` | Dashboard | hardcoded `cutoff5dMs` u dashboard.ts |
-| `dashboard_call_todo_limit` | `20` | Dashboard | hardcoded `limit = 20` u dashboard.ts default arg |
-
-### Izmene u `src/lib/settings.ts`
-
-- Dodati 14 novih `SettingDef` unosa u `SETTINGS_CATALOG`.
-- Svaki sa punim opisom (description ≥ 1 rečenica + zašto je bitno).
-- Koriste `envHint` za postojeće env varijable (radi fallback).
-- Nove grupe uvedene u katalog (redosled: Slanje → Bounce → Scheduler → Scraper → IMAP → Dashboard → Unsubscribe).
-
-### Izmene u kodu koji ČITA podešavanja
-
-| Fajl | Izmena |
+| Pitanje | Odgovor |
 |---|---|
-| `src/lib/workers/scheduler.ts` | `process.env.SCHEDULER_TICK_MS` → `getSettingInt("scheduler_tick_ms")`. `BOUNCE_THRESHOLD` → `getSettingInt("bounce_threshold_pct") / 100`. `.limit(20)` → `getSettingInt("scheduler_batch_size")`. |
-| `src/instrumentation.ts` | `process.env.SCHEDULER_ENABLED === "1"` → `getSetting("scheduler_enabled") === "1"` (sa dynamic import). |
-| `src/lib/email/throttler.ts` | `recentBounceRate()`: hardcoded 7d/50 → `getSettingInt("bounce_window_days")` / `getSettingInt("bounce_sample_size")`. |
-| `src/lib/scraping/client.ts` | `max_pages: 20` → `getSettingInt("scraper_max_pages")`. |
-| `src/lib/email/imap.ts` | `secure: true` → `secure: getSettingBool("imap_secure")`. |
-| `src/lib/dashboard.ts` | Hardcoded `cutoff7dMs`/`cutoff3dMs`/`cutoff5dMs` → `getSettingInt("dashboard_*")`. `limit = 20` default → `getSettingInt("dashboard_call_todo_limit")`. |
-| `src/pages/api/senders.ts` | `process.env.DEFAULT_SENDER_DAILY_CAP/HOURLY_CAP` → već koriste `getSetting` za `.default()`, proveriti samo. `z.number().default(30/120)` → `getSettingInt("default_min/max_delay_sec")`. |
-| `src/pages/senders.astro` | HTML form default `value="30"`/`"120"` → ne dirati (placeholder), ali server-side default bi trebalo da koristi settings. |
-| `src/pages/api/settings/test-imap.ts` | `secure: true` → `getSettingBool("imap_secure")`. |
-| `src/pages/settings.astro` | UI refaktor (cela stranica). |
+| Nivo | Template default + draft override (draft zamenjuje template) |
+| Max size | 10 MB |
+| Dozvoljeni tipovi | `application/pdf`, `image/jpeg`, `image/png`, `image/webp` |
+| UI | Globalna biblioteka (`/attachments`) + inline u template/draft editoru |
 
-## Opisi za postojeća podešavanja
+## Arhitektura
 
-Popuniti `description` polje za SVE settings (i stare i nove). Primer:
+```
+[Browser]
+  ├─ /attachments           → globalna biblioteka (upload/list/delete/preview)
+  ├─ /templates/[edit]      → attach fajlove na template (default za sve draft-ove)
+  └─ /queue/[edit draft]    → override attachment za pojedinačni draft
+
+[Upload API]
+  POST /api/attachments (multipart)
+    → validacija (size, MIME)
+    → SHA-256 izračun
+    → ako postoji sa istim sha256 → vrati postojeći (dedup)
+    → sačuvaj na ~/outreach-data/attachments/<sha256>.<ext>
+    → INSERT u `attachments`
+    → vrati { id, original_name, mime_type, size }
+
+[Send flow]
+  processQueue() za queued email:
+    1. Pokušaj draft override:
+       SELECT * FROM email_send_attachments WHERE email_send_id = ?
+       Ako ima → koristi SAMO ove (skip template)
+    2. Inače, ako email ima prompt_template_id:
+       SELECT * FROM template_attachments WHERE template_id = ?
+    3. Ako ništa → nema attachment-a
+
+  sendEmail({ ..., attachments: [{filename, path}] })
+    → nodemailer attachments: [{ filename, path }]
+    → multipart MIME, primaoc vidi attachment u inboxu
+```
+
+## Fajlovi
+
+### Novi API endpoint-i
+
+| Putanja | Metod | Svrha |
+|---|---|---|
+| `src/pages/api/attachments/index.ts` | POST, GET | upload + list |
+| `src/pages/api/attachments/[id].ts` | GET, DELETE | metadata + delete |
+| `src/pages/api/attachments/[id]/file.ts` | GET | download/preview (binarno) |
+| `src/pages/api/templates/[id]/attachments.ts` | POST, DELETE | veži/odveži na template |
+| `src/pages/api/email/drafts/[id]/attachments.ts` | POST, DELETE | override na draft |
+
+### Novi lib
+
+| Putanja | Svrha |
+|---|---|
+| `src/lib/attachments.ts` | `validateUpload()`, `saveAttachment()`, `getAttachmentsForSend()`, `purgeUnused()` |
+
+### Izmene
+
+| Putanja | Izmena |
+|---|---|
+| `src/lib/db/schema.ts` | +3 tabele (attachments, template_attachments, email_send_attachments) |
+| `src/lib/settings.ts` | +2 settings (attachment_max_size_mb, attachment_allowed_mime) u grupi "Email attachments" |
+| `src/lib/email/sender.ts` | `SendInput.attachments?: {filename, path}[]`, prosleđuje nodemailer-u |
+| `src/lib/workers/scheduler.ts` | Pre slanja, izračunaj `getAttachmentsForSend(emailSendId)` i prosledi |
+| `src/components/Sidebar.astro` | Dodaj "Attachments" link (Setup sekcija) |
+| `src/pages/templates.astro` | Prikaz i edit attachment-a u template formi |
+| `src/pages/queue.astro` | Prikaz attachment-a po draft-u, override UI |
+| `deploy/backup-outreach.sh` | +tar attachments dir u backup |
+| `docker-compose.vps.yml` | (nema izmene — attachment-i idu kroz postojeći `~/outreach-data:/data` mount) |
+| `README.md` | +sekcija "Email attachments" |
+
+### Novi UI
+
+- `src/pages/attachments.astro` — globalna biblioteka
+  - Drag&drop zona za upload
+  - Tabela: ime, MIME, veličina, datum, [preview] [delete]
+  - Prazno stanje sa uputstvom
+- `src/components/AttachmentPicker.astro` — modal za izbor iz biblioteke
+- `src/components/AttachmentList.astro` — readonly lista sa remove dugmadima
+
+## Validacija
 
 ```ts
-send_window_start: {
-  key: "send_window_start",
-  defaultValue: "09:00",
-  group: "Slanje emaila",
-  title: "Početak prozora slanja",          // NOVO (prikaz u kartici)
-  label: "Početak (HH:MM)",                  // postojalo, zadržati kao input label
-  description:
-    "Od kog sata scheduler sme da šalje. " +
-    "Format 24h (HH:MM). Podešava se po lokalnom vremenu sendera, " +
-    "ne primaoca. Aktivno samo u dane definisane u 'Dani slanja'.",
-  type: "text",
-  envHint: "SEND_WINDOW_START",
-},
+const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+const MAX_SIZE_DEFAULT = 10 * 1024 * 1024; // 10MB
+// čita se iz settings `attachment_max_size_mb` i parsira `attachment_allowed_mime` (comma-list)
 ```
 
-## Validacija (pre commit-a)
+Upload validator:
+- `file.size > MAX_SIZE` → 400 "Max 10MB"
+- `!ALLOWED_MIME.includes(file.type)` → 400 "Tip nije dozvoljen"
+- Prazan fajl → 400
 
-- `npm run typecheck` u `gui-astro/`.
-- `npm run build` (testira SSR — AGENTS.md poznati issue: Turbopack traži DATABASE_URL u build env, OK).
-- Ručno: otvoriti `/settings`, kliknuti svaku sidebar stavku, sačuvati, restartovati server, proveriti da vrednost opstaje.
-- Audit log: `settings.change` akcija se već loguje (proveriti u `lib/audit.ts`).
+## Storage
 
-## Nije u scope-u (napomena za sledeći put)
+```
+~/outreach-data/attachments/<sha256>.<ext>
+```
 
-- Bulk job config (batch size/interval) — može ići u Scheduler ako se ukaže potreba.
-- Per-sender delay override (već u senders tabeli kao kolone).
-- Audit log retencija (cleanup job) — poseban feature.
-- `imap_secure` već postoji kao env var? Ne — nisam našao, samo hardcoded.
-- Disclaimer za SMTP testiranje u UI (pored IMAP test dugmeta).
+- Van repo-a (kao `outreach.db`)
+- Lako se bekapuje (tar u `backup-outreach.sh`)
+- Deduplikacija po sha256 — isti fajl upload-ovan 2x ne duplira se
+- Container path: `/data/attachments/<sha256>.<ext>` (kroz postojeći mount)
+
+## API detalji
+
+### POST /api/attachments (multipart)
+
+Request: `FormData { file: File }`
+Response 201: `{ id, original_name, mime_type, size, uploaded_at }`
+Errors: 400 (validacija), 413 (prevelik), 415 (pogrešan tip)
+
+### GET /api/attachments
+
+Response: `[{ id, original_name, mime_type, size, uploaded_at, used_by_templates: number, used_by_drafts: number }]`
+
+### DELETE /api/attachments/[id]
+
+- Ako `used_by_templates + used_by_drafts > 0` → 409 "Koristi se u N template-a i M draft-ova"
+- Inače: obriši fajl sa diska + DELETE row
+
+### POST /api/templates/[id]/attachments
+
+Body: `{ attachment_id: number }`
+→ INSERT u template_attachments (ON CONFLICT IGNORE)
+
+### POST /api/email/drafts/[id]/attachments
+
+Body: `{ attachment_id: number }`
+→ Briše SVE prethodne email_send_attachments za taj draft (override znači zamenu)
+→ INSERT novu
+
+## Settings (nova grupa "Email attachments")
+
+```yaml
+- key: attachment_max_size_mb
+  defaultValue: "10"
+  type: number
+  unit: MB
+  description: Maksimalna veličina po attachment fajlu...
+
+- key: attachment_allowed_mime
+  defaultValue: "application/pdf,image/jpeg,image/png,image/webp"
+  type: text
+  description: Dozvoljeni MIME tipovi (comma-separated)...
+```
+
+## UI flow
+
+### Upload attachment
+1. Odeš na `/attachments`
+2. Drag-drop ili klik → file picker
+3. Validacija uživo (size, MIME)
+4. Upload → pojavi se u listi
+5. Download dugme za preview
+
+### Dodaj na template
+1. Odeš na `/templates`
+2. Edit template → vidiš "Attachments (0)" sekcija
+3. Klik "Dodaj attachment" → modal sa listom iz biblioteke
+4. Izaberi → pojavi se u listi sa remove dugmetom
+
+### Override na draft
+1. Odeš na `/queue`
+2. Otvoriš draft → vidiš "Attachments: nasleđeno od template-a [x]" ILI "Custom: [...]"
+3. Klik "Zameni" → modal sa listom → izaberi
+4. Ili klik "Ukloni sve" da pošalješ bez attachment-a
+
+## Send logika (scheduler)
+
+```ts
+// scheduler.ts, unutar processQueue()
+const attachments = getAttachmentsForSend(es.id); // draft override ILI template ILI []
+const sendRes = await sendEmail({
+  // ... postojeća polja
+  attachments,
+});
+```
+
+`getAttachmentsForSend(emailSendId)`:
+1. SELECT * FROM email_send_attachments JOIN attachments WHERE email_send_id = ?
+2. Ako rows.length > 0 → vrati draft attachments (override)
+3. Inače ako email_send ima prompt_template_id:
+   SELECT * FROM template_attachments JOIN attachments WHERE template_id = ?
+4. Vrati prazan niz
+
+```ts
+// lib/email/sender.ts — SendInput
+export interface SendInput {
+  // ... postojeća polja
+  attachments?: { filename: string; path: string }[];
+}
+
+// u sendMail()
+attachments: input.attachments?.map(a => ({
+  filename: a.filename,
+  path: a.path,
+})),
+```
+
+## Bezbednost
+
+- Upload validira MIME i size pre čuvanja
+- MIME po content-type header-u (ne po ekstenziji — može se falsifikovati)
+- File path NE dolazi od korisnika — uvek se generiše `<sha256>.<ext>` iz content-a
+- `originalName` se čuva samo za prikaz u UI, ne koristi se za slanje
+- Send logika koristi isključivo DB-čuvane path-ove
+
+## Testiranje
+
+- Upload PDF → pojavi se u `/attachments`
+- Dodaj na template → vidi se u template edit formi
+- Draft iz tog template-a → "nasleđeno" + broj attachment-a
+- Override na draft → vidi se custom
+- Pošalji test email → attachment stiže u inbox
+- Bulk delete template → cascade briše template_attachments
+- Obriši attachment koji se koristi → 409 error
+- Backup skripta → tar attachments + restore
+
+## Nije u scope-u (za sledeći put)
+
+- Inline slike u telu emaila (CID attachments)
+- Attachment-i iz URL-a (npr. logo sa CDN-a)
+- Cloud storage (S3) za attachment preko 50MB
+- Antivirus/MIME validacija (Content-Type po header-u je bazična)
+- Auto-cleanup orphaned attachment-a (purgeUnused helper u lib, ali UI nije u v1)

@@ -166,6 +166,61 @@ export const siteAnalysis = sqliteTable("site_analysis", {
 });
 
 // ------------------------------------------------------------------
+// site_audits — multi-criteria site ranking produced by scraper/audit/
+//
+// overall_rank is 0-100 weighted score across 7 categories (seo, perf, content,
+// security, mobile_a11y, tech_modern, authority). verdict mirrors the bands:
+//   0–30   critical   31–55  below_avg   56–70  average
+//   71–85  good       86–100 excellent
+// ------------------------------------------------------------------
+export const siteAudits = sqliteTable(
+  "site_audits",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    scrapeId: integer("scrape_id").references(() => siteScrapes.id, { onDelete: "set null" }),
+    domain: text("domain"),
+    overallRank: integer("overall_rank").notNull(), // 0–100
+    verdict: text("verdict").notNull(), // critical|below_avg|average|good|excellent
+    verdictLabel: text("verdict_label"),
+    pitchAdvice: text("pitch_advice"),
+    topIssuesJson: text("top_issues_json"), // string[]
+    categoryScoresJson: text("category_scores_json"), // {seo: {score, weight, weighted, issues}}
+    metricsJson: text("metrics_json"), // whole site_signals blob for "detailed metric report"
+    durationMs: integer("duration_ms").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now()),
+  },
+  (t) => ({
+    leadIdx: index("site_audits_lead_id_idx").on(t.leadId),
+    rankIdx: index("site_audits_overall_rank_idx").on(t.overallRank),
+  }),
+);
+
+// ------------------------------------------------------------------
+// site_audit_metrics — one row per (audit, category).
+// ------------------------------------------------------------------
+export const siteAuditMetrics = sqliteTable(
+  "site_audit_metrics",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    auditId: integer("audit_id")
+      .notNull()
+      .references(() => siteAudits.id, { onDelete: "cascade" }),
+    category: text("category").notNull(), // seo|performance|content|security|mobile_a11y|tech_modern|authority
+    score: integer("score").notNull(), // 0–100 subscore
+    weight: real("weight").notNull(),
+    weighted: real("weighted").notNull(),
+    issuesJson: text("issues_json"), // string[]
+    rawJson: text("raw_json"), // raw measured values for that category
+  },
+  (t) => ({
+    auditIdx: index("site_audit_metrics_audit_id_idx").on(t.auditId),
+  }),
+);
+
+// ------------------------------------------------------------------
 // prompt_templates
 // ------------------------------------------------------------------
 export const promptTemplates = sqliteTable("prompt_templates", {
@@ -309,6 +364,64 @@ export const settings = sqliteTable("settings", {
 });
 
 // ------------------------------------------------------------------
+// attachments — globalna biblioteka email attachment-a
+// ------------------------------------------------------------------
+// Fajlovi se čuvaju na disku: ~/outreach-data/attachments/<sha256>.<ext>
+// Deduplikacija po sha256 — isti sadržaj se ne čuva dva puta.
+export const attachments = sqliteTable("attachments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // sha256 + ekstenzija (npr. "a1b2c3.pdf"). Koristi se za storage path.
+  filename: text("filename").notNull(),
+  // Originalno ime fajla (npr. "Ponuda 2025.pdf") — za prikaz u UI i email attachment header.
+  originalName: text("original_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(), // bytes
+  sha256: text("sha256").notNull().unique(),
+  uploadedAt: integer("uploaded_at", { mode: "timestamp_ms" }).default(now()),
+});
+
+// ------------------------------------------------------------------
+// template_attachments — default attachment-i za sve draft-ove iz template-a
+// ------------------------------------------------------------------
+// Ako draft ima sopstvene email_send_attachments, OVERRIDE-uju template (ne dodaju se).
+export const templateAttachments = sqliteTable(
+  "template_attachments",
+  {
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => promptTemplates.id, { onDelete: "cascade" }),
+    attachmentId: integer("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => ({
+    pk: uniqueIndex("template_attachments_pk").on(t.templateId, t.attachmentId),
+    templateIdx: index("template_attachments_template_idx").on(t.templateId),
+  }),
+);
+
+// ------------------------------------------------------------------
+// email_send_attachments — override attachment-i za pojedinačni draft
+// ------------------------------------------------------------------
+// Ako postoji bar jedan, scheduler šalje SAMO ove (ignoriše template).
+export const emailSendAttachments = sqliteTable(
+  "email_send_attachments",
+  {
+    emailSendId: integer("email_send_id")
+      .notNull()
+      .references(() => emailSends.id, { onDelete: "cascade" }),
+    attachmentId: integer("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: uniqueIndex("email_send_attachments_pk").on(t.emailSendId, t.attachmentId),
+    emailSendIdx: index("email_send_attachments_send_idx").on(t.emailSendId),
+  }),
+);
+
+// ------------------------------------------------------------------
 // Tipovi (export)
 // ------------------------------------------------------------------
 export type Lead = typeof leads.$inferSelect;
@@ -320,6 +433,10 @@ export type SiteScrape = typeof siteScrapes.$inferSelect;
 export type SitePage = typeof sitePages.$inferSelect;
 export type Screenshot = typeof screenshots.$inferSelect;
 export type SiteAnalysis = typeof siteAnalysis.$inferSelect;
+export type SiteAudit = typeof siteAudits.$inferSelect;
+export type NewSiteAudit = typeof siteAudits.$inferInsert;
+export type SiteAuditMetric = typeof siteAuditMetrics.$inferSelect;
+export type NewSiteAuditMetric = typeof siteAuditMetrics.$inferInsert;
 export type PromptTemplate = typeof promptTemplates.$inferSelect;
 export type Sender = typeof senders.$inferSelect;
 export type Sequence = typeof sequences.$inferSelect;
@@ -330,3 +447,7 @@ export type BlocklistEntry = typeof blocklist.$inferSelect;
 export type AiChat = typeof aiChats.$inferSelect;
 export type Setting = typeof settings.$inferSelect;
 export type User = typeof users.$inferSelect;
+export type Attachment = typeof attachments.$inferSelect;
+export type NewAttachment = typeof attachments.$inferInsert;
+export type TemplateAttachment = typeof templateAttachments.$inferSelect;
+export type EmailSendAttachment = typeof emailSendAttachments.$inferSelect;

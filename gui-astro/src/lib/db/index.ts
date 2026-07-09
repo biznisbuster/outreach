@@ -81,6 +81,39 @@ function createConnection() {
     );
     CREATE INDEX IF NOT EXISTS audit_log_ts_idx ON audit_log(ts);
     CREATE INDEX IF NOT EXISTS audit_log_entity_idx ON audit_log(entity, entity_id);
+
+    -- site_audits — multi-criteria site ranking (created by scraper/audit/).
+    -- Same shape as gui-astro/src/lib/db/schema.ts (siteAudits). Belt-and-suspenders:
+    -- if the app was started before schema.ts was updated, the tables still appear.
+    CREATE TABLE IF NOT EXISTS site_audits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      scrape_id INTEGER REFERENCES site_scrapes(id) ON DELETE SET NULL,
+      domain TEXT,
+      overall_rank INTEGER NOT NULL,
+      verdict TEXT NOT NULL,
+      verdict_label TEXT,
+      pitch_advice TEXT,
+      top_issues_json TEXT,
+      category_scores_json TEXT,
+      metrics_json TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER DEFAULT (unixepoch() * 1000)
+    );
+    CREATE INDEX IF NOT EXISTS site_audits_lead_id_idx ON site_audits(lead_id);
+    CREATE INDEX IF NOT EXISTS site_audits_overall_rank_idx ON site_audits(overall_rank);
+
+    CREATE TABLE IF NOT EXISTS site_audit_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      audit_id INTEGER NOT NULL REFERENCES site_audits(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      weight REAL NOT NULL,
+      weighted REAL NOT NULL,
+      issues_json TEXT,
+      raw_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS site_audit_metrics_audit_id_idx ON site_audit_metrics(audit_id);
   `);
 
   return { db, raw };

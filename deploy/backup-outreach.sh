@@ -60,6 +60,13 @@ if [ -d "$DATA_DIR/scraper-runs" ] && [ -n "$(ls -A "$DATA_DIR/scraper-runs" 2>/
   log "  ✓ scraper-runs: $(basename "$RUNS_TAR") ($(du -h "$RUNS_TAR" | cut -f1))"
 fi
 
+# 3b. Email attachments (PDF ponude, slike)
+if [ -d "$DATA_DIR/attachments" ] && [ -n "$(ls -A "$DATA_DIR/attachments" 2>/dev/null)" ]; then
+  ATT_TAR="$BACKUP_DIR/daily/attachments-$TODAY.tar.gz"
+  tar -czf "$ATT_TAR" -C "$DATA_DIR" attachments
+  log "  ✓ attachments: $(basename "$ATT_TAR") ($(du -h "$ATT_TAR" | cut -f1))"
+fi
+
 # 4. Rotacija — briše bekape starije od X dana
 find "$BACKUP_DIR/daily" -type f -name "*.gz" -mtime "+$KEEP_DAILY" -delete -print | sed 's/^/  - /'
 find "$BACKUP_DIR/weekly" -type f -name "*.gz" -mtime "+$((KEEP_WEEKLY * 7))" -delete -print | sed 's/^/  - /'
