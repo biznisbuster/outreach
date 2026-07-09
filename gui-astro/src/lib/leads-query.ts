@@ -311,8 +311,6 @@ export const COLUMNS: ColMeta[] = [
   { key: "m3Overall", label: "M3", sortable: true, align: "center", width: "w-16", defaultDir: "desc" },
   { key: "m3Seo", label: "SEO", sortable: true, align: "center", width: "w-16", defaultDir: "desc" },
   { key: "lastEmail", label: "Posl. email", sortable: true, align: "center", width: "w-28", defaultDir: "desc" },
-  { key: "importedAt", label: "Import", sortable: true, align: "center", width: "w-24", defaultDir: "desc" },
   { key: "doNotContact", label: "DNC", sortable: true, align: "center", width: "w-16" },
-  { key: "source", label: "Izvor", sortable: true, width: "w-24" },
   { key: "screenshot", label: "📷", sortable: false, align: "center", width: "w-12", headerHtml: "📷" },
 ];

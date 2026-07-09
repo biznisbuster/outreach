@@ -14,7 +14,9 @@ import Card from "../../components/Card.astro";
 import CardContent from "../../components/CardContent.astro";
 import PageHeader from "../../components/PageHeader.astro";
 import SortHeader from "../../components/SortHeader.astro";
+import SortBar from "../../components/SortBar.astro";
 import FilterPanel from "../../components/FilterPanel.astro";
+import QuickFilters from "../../components/QuickFilters.astro";
 import { getDb, schema } from "../../lib/db";
 import { asc } from "drizzle-orm";
 import { eq, sql } from "drizzle-orm";
@@ -227,7 +229,7 @@ const hasAnyFilter =
       <!-- FilterBar + collapsible advanced -->
       <Card>
         <CardContent class="pt-6">
-          <form method="get" class="space-y-3">
+          <form method="get" class="space-y-4">
             <!-- Skriveno: sačuvaj sort -->
             <input type="hidden" name="sort" value={sortParam} />
 
@@ -237,24 +239,24 @@ const hasAnyFilter =
                 type="text"
                 name="search"
                 value={filters.search}
-                placeholder="Pretraga (naziv, email, grad, web, kategorija)"
-                class="flex h-9 w-72 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                placeholder="Pretraga…"
+                class="flex h-9 w-64 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               <select name="statusId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-                <option value="">Svi statusi</option>
+                <option value="">Status: svi</option>
                 <option value="null" selected={filters.statusId === "null"}>Bez statusa</option>
                 {statuses.map((s) => (
                   <option value={String(s.id)} selected={filters.statusId === String(s.id)}>{s.name}</option>
                 ))}
               </select>
               <select name="campaignId" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-                <option value="">Sve kampanje</option>
+                <option value="">Kampanja: sve</option>
                 {campaigns.map((c) => (
                   <option value={String(c.id)} selected={filters.campaignId === String(c.id)}>{c.name}</option>
                 ))}
               </select>
               <select name="city" class="flex h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-                <option value="">Svi gradovi</option>
+                <option value="">Grad: svi</option>
                 {cities.map((c) => (
                   <option value={c} selected={filters.city === c}>{c}</option>
                 ))}
@@ -265,11 +267,17 @@ const hasAnyFilter =
               )}
             </div>
 
+            <!-- Brzi filteri (toggle chip-ovi) — inline, vidljivi odmah -->
+            <QuickFilters filters={filters} />
+
             <!-- Collapsible advanced filters -->
             <FilterPanel filters={filters} />
           </form>
         </CardContent>
       </Card>
+
+      <!-- Sort bar — vidljiva lista aktivnih sortova -->
+      <SortBar currentSort={sortParam} />
 
       <!-- Tabela sa fiksnom visinom -->
       <Card class="overflow-hidden">

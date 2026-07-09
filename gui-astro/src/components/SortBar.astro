@@ -1,0 +1,130 @@
+---
+/**
+ * SortBar — vidljiva lista aktivnih sortova iznad tabele.
+ *
+ * Prikazuje svaku sortirnu kolonu kao "chip" sa:
+ *   - Naziv kolone + strelica smera (▲/▼)
+ *   - Broj prioriteta (1, 2, 3)
+ *   - X dugme za uklanjanje
+ *
+ * Ispod liste: dropdown za dodavanje nove kolone u multi-sort.
+ *
+ * Render samo ako postoji aktivan sort (ne prazan kada nema filtera).
+ *
+ * State: ?sort=name:asc,city:desc (deli sa klik/Shift+Klik na headerima).
+ */
+import { COLUMNS } from "../lib/leads-query";
+
+interface Props {
+  currentSort: string; // encoded "name:asc,city:desc"
+}
+const { currentSort } = Astro.props;
+
+const sorts = currentSort
+  ? currentSort.split(",").map((p) => {
+      const [k, d] = p.split(":");
+      return { key: k, dir: (d === "asc" ? "asc" : "desc") as "asc" | "desc" };
+    })
+  : [];
+
+// Filtriraj COLUMNS — samo sortable, i izbaci one koje su već u sortu
+const sortableCols = COLUMNS.filter((c) => c.sortable);
+const usedKeys = new Set(sorts.map((s) => s.key));
+const availableCols = sortableCols.filter((c) => !usedKeys.has(c.key));
+
+function colLabel(key: string): string {
+  const c = sortableCols.find((x) => x.key === key);
+  return c?.label ?? key;
+}
+
+function buildSortUrl(entries: Array<{ key: string; dir: "asc" | "desc" }>) {
+  const params = new URLSearchParams(location.search);
+  if (entries.length === 0) {
+    params.delete("sort");
+  } else {
+    params.set("sort", entries.map((e) => `${e.key}:${e.dir}`).join(","));
+  }
+  params.delete("page");
+  return `?${params.toString()}`;
+}
+---
+
+{sorts.length > 0 && (
+  <div class="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+    <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sort:</span>
+    {sorts.map((s, i) => {
+      const newSorts = sorts.filter((_, idx) => idx !== i);
+      return (
+        <span class="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium shadow-sm">
+          <span class="rounded bg-primary/15 px-1 text-[9px] font-bold text-primary">{i + 1}</span>
+          <span>{colLabel(s.key)}</span>
+          <span class={s.dir === "asc" ? "text-emerald-600" : "text-amber-600"}>
+            {s.dir === "asc" ? "↑" : "↓"}
+          </span>
+          <a
+            href={buildSortUrl(newSorts)}
+            class="ml-0.5 text-muted-foreground hover:text-red-600"
+            title="Ukloni iz sorta"
+            aria-label={`Ukloni ${colLabel(s.key)} iz sorta`}
+          >×</a>
+        </span>
+      );
+    })}
+
+    {availableCols.length > 0 && (
+      <details class="relative">
+        <summary class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-dashed border-input bg-transparent px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Dodaj sort
+        </summary>
+        <div class="absolute right-0 top-full z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg">
+          {availableCols.map((c) => {
+            const newSorts = [...sorts, { key: c.key, dir: (c.defaultDir ?? "asc") as "asc" | "desc" }];
+            return (
+              <a
+                href={buildSortUrl(newSorts)}
+                class="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
+              >
+                <span>{c.label}</span>
+                <span class="text-[10px] text-muted-foreground">{c.defaultDir === "desc" ? "↓" : "↑"}</span>
+              </a>
+            );
+          })}
+        </div>
+      </details>
+    )}
+
+    <a
+      href={buildSortUrl([])}
+      class="ml-auto text-[10px] text-muted-foreground hover:text-red-600 hover:underline"
+      title="Ukloni sve sortove"
+    >
+      Reset sort
+    </a>
+  </div>
+)}
+
+{sorts.length === 0 && (
+  <div class="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+    <span>Klik na header kolone za sortiranje.</span>
+    <details class="relative ml-auto">
+      <summary class="inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-input bg-background px-2 font-medium hover:bg-accent">
+        + Dodaj sort
+      </summary>
+      <div class="absolute right-0 top-full z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg">
+        {sortableCols.map((c) => {
+          const newSorts = [{ key: c.key, dir: (c.defaultDir ?? "asc") as "asc" | "desc" }];
+          return (
+            <a
+              href={buildSortUrl(newSorts)}
+              class="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
+            >
+              <span>{c.label}</span>
+              <span class="text-[10px] text-muted-foreground">{c.defaultDir === "desc" ? "↓" : "↑"}</span>
+            </a>
+          );
+        })}
+      </div>
+    </details>
+  </div>
+)}

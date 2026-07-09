@@ -1,0 +1,66 @@
+---
+/**
+ * QuickFilters — inline toggle chip-ovi za najčešće filtere.
+ *
+ * Renderuje se u osnovnom FilterBar-u, između osnovnih polja i dugmeta Filtriraj.
+ * Svaki chip je <label> sa checkboxom — submit forme automatski primeni.
+ *
+ * Čipovi:
+ *   - Ima email
+ *   - Ima telefon
+ *   - Ima screenshot
+ *   - Ima M3 ocenu
+ *   - Bez sajta
+ *   - Samo DNC
+ */
+import type { LeadFilterValues } from "../lib/leads-query";
+
+interface Props {
+  filters: LeadFilterValues;
+}
+const { filters } = Astro.props;
+
+interface Chip {
+  key: keyof LeadFilterValues;
+  label: string;
+  icon?: string;
+}
+
+const chips: Chip[] = [
+  { key: "hasEmail", label: "Ima email" },
+  { key: "hasPhone", label: "Ima telefon" },
+  { key: "hasScreenshot", label: "Ima screenshot" },
+  { key: "hasAnalysis", label: "Ima M3" },
+  { key: "noWebsite", label: "Bez sajta" },
+  { key: "dnc", label: "Samo DNC" },
+];
+---
+
+<div class="flex flex-wrap items-center gap-1.5">
+  {chips.map((chip) => {
+    // dnc je tri-state (any|true|false), ostali su boolean
+    const isActive = chip.key === "dnc"
+      ? filters.dnc === true
+      : Boolean(filters[chip.key]);
+    return (
+      <label
+        class:list={[
+          "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors select-none",
+          isActive
+            ? "border-primary bg-primary/10 text-primary"
+            : "border-input bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+        ]}
+      >
+        <input
+          type="checkbox"
+          name={chip.key}
+          value="1"
+          checked={isActive}
+          class="sr-only"
+        />
+        {isActive && <span class="h-1.5 w-1.5 rounded-full bg-primary" />}
+        {chip.label}
+      </label>
+    );
+  })}
+</div>
