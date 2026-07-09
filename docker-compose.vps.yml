@@ -1,19 +1,22 @@
 # ============================================================================
-# Outreach — VPS deployment
+# Outreach — VPS deployment (oba scrapera, profiles za selektivno paljenje)
 # ----------------------------------------------------------------------------
-# Baza živi na hostu u $OUTREACH_DATA_DIR (default ~/outreach-data/) — van
-# repo foldera, lako se bekapuje, ne gubi se pri redeploy-u.
+# Baza živi na hostu u $OUTREACH_DATA_DIR (default ~/outreach-data/).
+#
+# Profili (default uključuje OBA):
+#   docker compose -f docker-compose.vps.yml --env-file .env up -d
+#     → gui-astro + scraper + scraper-leads
+#
+# Samo cold outreach (BEZ scraper-leads):
+#   docker compose -f docker-compose.vps.yml --env-file .env \
+#                  --profile outreach up -d
+#
+# Samo lead generation (BEZ scraper-a):
+#   docker compose -f docker-compose.vps.yml --env-file .env \
+#                  --profile leadgen up -d
 #
 # Reverse proxy (Caddy/Nginx) radi SISTEMSKI na hostu, NE u compose-u.
 # gui-astro je izložen samo na 127.0.0.1:3000 — proxy treba da gleda tu.
-#
-# Pokretanje:
-#   ./deploy/setup-vps.sh                          # jednom: kreira data dir
-#   docker compose -f docker-compose.vps.yml \
-#                  --env-file .env up -d --build   # start
-#
-# Logovi:
-#   docker compose -f docker-compose.vps.yml logs -f
 # ============================================================================
 
 services:
@@ -26,43 +29,34 @@ services:
     restart: unless-stopped
 
     env_file: .env
-    # Override kontejner-specifičnih varijabli (compose env > env_file).
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
-      # Kontejnerski path do istog fajla kao i u scraperima — mount je /data.
       DATABASE_URL: file:/data/outreach.db
-      SCRAPER_URL: http://scraper:8001
-      SCRAPER_LEADS_URL: http://scraper-leads:8002
-      # Astro je iza reverse proxy-ja (Caddy/Nginx) — veruj X-Forwarded-* headerima.
+      SCRAPER_URL: ${SCRAPER_URL:-http://scraper:8001}
+      SCRAPER_LEADS_URL: ${SCRAPER_LEADS_URL:-http://scraper-leads:8002}
       AUTH_TRUST_HOST: "true"
 
-    # UID/GID za alpine `node` user (default 1000:1000).
-    # Ako tvoj VPS user ima drugačiji UID, overriduj u .env:
-    #   UID=1001
-    #   GID=1001
     user: "${UID:-1000}:${GID:-1000}"
 
     volumes:
-      # Bind mount: host folder → /data u kontejneru. OutREACH_DATA_DIR je
-      # apsolutna putanja (setup-vps.sh je upisuje u .env).
       - ${OUTREACH_DATA_DIR:?OUTREACH_DATA_DIR mora biti apsolutna putanja u .env}:/data
 
     ports:
-      # Samo loopback — sistemski Caddy/Nginx radi reverse proxy na ovo.
       - "127.0.0.1:3000:3000"
 
     depends_on:
       scraper:
         condition: service_started
+        required: false
       scraper-leads:
         condition: service_healthy
+        required: false
 
     networks: [outreach]
 
     healthcheck:
-      # wget je u node:alpine; -q tiho, -O- stdout, --spider ne bi radio.
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
       timeout: 5s
@@ -70,6 +64,7 @@ services:
       start_period: 30s
 
   scraper:
+    profiles: ["default", "outreach"]
     build:
       context: ./scraper
       dockerfile: Dockerfile
@@ -87,10 +82,8 @@ services:
 
     networks: [outreach]
 
-    # scraper nema /health uvek; ako dodaš, stavi condition: service_healthy
-    # u gui-astro depends_on.
-
   scraper-leads:
+    profiles: ["default", "leadgen"]
     build:
       context: ./scraper-leads
       dockerfile: Dockerfile

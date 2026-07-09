@@ -1,0 +1,85 @@
+# ============================================================================
+# .dockerignore — smanjuje build kontekst sa ~1.5 GB na par MB
+# ============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Node
+node_modules
+.npm
+.yarn
+.pnpm-store
+**/node_modules
+**/package-lock.json.bak
+
+# Astro/Next build output
+dist
+.next
+.astro
+.turbo
+out
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/.tox
+
+# Data — produkciona baza, NE SME u image
+data/
+**/outreach.db
+**/outreach.db-*
+
+# Screenshots / scraper output
+**/screenshots
+**/scraper-runs
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Deploy / compose (ne treba u image)
+deploy/
+docker-compose*.yml
+Dockerfile.*
+Caddyfile*
+Caddyfile.vps.example
+
+# Pi / agent artifacts
+.pi/
+.pi-tmp/
+SESSION-SUMMARY.md
+AGENTS.md
+app.zip
+
+# Docs (ne treba u runtime image)
+README.md
+docs/
+examples/
+**/*.md
+!gui-astro/README.md
+!scraper/README.md
+!scraper-leads/README.md
