@@ -1,0 +1,575 @@
+---
+/**
+ * AuditPanel — server-rendered Site Audit tab content.
+ *
+ * Inputs:
+ *   lead: row from leads table
+ *   report: hydrated audit row (or null)
+ *   metrics: site_audit_metrics rows (or [])
+ *
+ * The first paint comes from the server (Astro). After the user clicks
+ * "Re-audit" or "Run audit", the panel is re-rendered via fetch →
+ * HTML swap, so this component is also rendered client-side via
+ * innerHTML. Keep markup self-contained: all scripts inline, no deps
+ * on outer scope.
+ */
+
+interface AuditCategory {
+  score: number;
+  weight: number;
+  weighted: number;
+  issues?: string[];
+}
+interface MetricRow {
+  id: number;
+  category: string;
+  score: number;
+  weight: number;
+  weighted: number;
+  issuesJson?: string | null;
+  rawJson?: string | null;
+}
+interface ReportRow {
+  id: number;
+  leadId: number;
+  scrapeId: number | null;
+  domain: string | null;
+  overallRank: number;
+  verdict: string;
+  verdictLabel: string | null;
+  pitchAdvice: string | null;
+  top_issues?: string[];
+  categories?: Record<string, AuditCategory>;
+  metrics?: Record<string, any>;
+  durationMs: number;
+  createdAt: number | Date | null;
+  createdAtIso?: string | null;
+}
+
+interface Props {
+  lead: { id: number; name: string; websiteNormalized?: string | null };
+  report: ReportRow | null;
+  metrics: MetricRow[];
+  /** Has this lead ever been scraped? Controls empty-state. */
+  hasScrape: boolean;
+}
+const { lead, report, metrics, hasScrape } = Astro.props as Props;
+
+const verdictMeta: Record<string, { emoji: string; cls: string; bg: string; border: string }> = {
+  critical:  { emoji: "🔴", cls: "text-red-700 dark:text-red-300",    bg: "bg-red-50 dark:bg-red-950/30",     border: "border-red-300/60" },
+  below_avg: { emoji: "🟠", cls: "text-orange-700 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-950/30", border: "border-orange-300/60" },
+  average:   { emoji: "🟡", cls: "text-amber-700 dark:text-amber-300",  bg: "bg-amber-50 dark:bg-amber-950/30", border: "border-amber-300/60" },
+  good:      { emoji: "🟢", cls: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-950/30", border: "border-emerald-300/60" },
+  excellent: { emoji: "🟢", cls: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-950/30", border: "border-emerald-300/60" },
+};
+
+const formatNumber = (n: unknown) =>
+  typeof n === "number" && isFinite(n) ? new Intl.NumberFormat("sr-RS").format(n) : "—";
+
+const durationLabel = (ms: number) =>
+  ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+
+const overallLabel = (report?: ReportRow | null): { rank: number; meta: typeof verdictMeta[keyof typeof verdictMeta] } | null => {
+  if (!report) return null;
+  const rank = report.overallRank;
+  const meta = verdictMeta[report.verdict as string] ?? verdictMeta.average;
+  return { rank, meta };
+};
+
+// Build category rows server-side
+type CatRow = { key: string; label: string; score: number; weight: number; weighted: number; issues: string[]; raw: any };
+const CAT_LABELS: Record<string, string> = {
+  seo: "SEO",
+  performance: "Performance",
+  content: "Content",
+  security: "Security",
+  mobile_a11y: "Mobile / A11y",
+  tech_modern: "Tech / Modern",
+  authority: "Authority",
+};
+
+function buildCatRows(): CatRow[] {
+  if (!report) return [];
+  const cats = (report.categories ?? {}) as Record<string, AuditCategory>;
+  const metricsByKey: Record<string, MetricRow> = {};
+  for (const m of metrics) metricsByKey[m.category] = m;
+  return Object.keys(CAT_LABELS).map((k) => {
+    const c = cats[k] ?? { score: 0, weight: 0, weighted: 0, issues: [] };
+    const m = metricsByKey[k];
+    const rawCat = (report.metrics ?? {})[k] ?? {};
+    // For the audit-panel server render, raw per-category is held in metricsJson
+    // under the same key (seo/performance/...). If we have a metrics row with
+    // rawJson populated use that, otherwise fall back to metricsJson[k].
+    let raw = rawCat;
+    if (m && m.rawJson) {
+      try { raw = JSON.parse(m.rawJson as unknown as string); } catch { /* ignore */ }
+    }
+    const issues = (c.issues ?? []) as string[];
+    return { key: k, label: CAT_LABELS[k], score: c.score, weight: c.weight, weighted: c.weighted, issues, raw };
+  });
+}
+
+function formatRaw(key: string, raw: any): { title: string; value: string }[] {
+  if (!raw || typeof raw !== "object") return [];
+  switch (key) {
+    case "seo": {
+      const meta = raw.meta ?? {};
+      return [
+        { title: "Pages analyzed",  value: formatNumber(meta.pages_analyzed) },
+        { title: "Title present",   value: `${formatNumber(meta.title_present_pct)}%` },
+        { title: "Meta description", value: `${formatNumber(meta.meta_description_present_pct)}%` },
+        { title: "H1 present",      value: `${formatNumber(meta.h1_present_pct)}%` },
+        { title: "Avg word count",  value: formatNumber(meta.avg_word_count) },
+        { title: "Canonical",       value: `${formatNumber(meta.canonical_pct)}%` },
+        { title: "JSON-LD",         value: `${formatNumber(meta.jsonld_pct)}%` },
+      ].filter((r) => r.value && r.value !== "—");
+    }
+    case "performance": {
+      return [
+        { title: "TTFB median",     value: `${formatNumber(raw.ttfb_ms_median)} ms` },
+        { title: "TTFB min–max",    value: `${formatNumber(raw.ttfb_ms_min)}–${formatNumber(raw.ttfb_ms_max)} ms` },
+        { title: "Page weight median", value: `${formatNumber(raw.page_weight_kb_median)} kB` },
+        { title: "Page weight max", value: `${formatNumber(raw.page_weight_kb_max)} kB` },
+        { title: "Render-blocking (median)", value: formatNumber(raw.render_blocking_count_median) },
+        { title: "Compression coverage", value: `${formatNumber(raw.compression_pct)}%` },
+        { title: "HTTP/2 detected", value: raw.http2_detected ? "Yes" : "No" },
+        { title: "Pages with resource hints", value: `${formatNumber(raw.resource_hints_pages_pct)}%` },
+      ].filter((r) => r.value && r.value !== "—");
+    }
+    case "content": {
+      return [
+        { title: "Pages analyzed", value: formatNumber(raw.pages_analyzed) },
+        { title: "Avg word count", value: formatNumber(raw.avg_word_count) },
+        { title: "Median word count", value: formatNumber(raw.median_word_count) },
+        { title: "Word count range", value: `${formatNumber(raw.word_count_min)}–${formatNumber(raw.word_count_max)}` },
+        { title: "Thin pages",      value: `${formatNumber(raw.thin_pages_pct)}%` },
+        { title: "Empty pages",     value: formatNumber(raw.empty_pages) },
+        { title: "Flesch reading ease (homepage)", value: formatNumber(raw.flesch_reading_ease_homepage) },
+        { title: "Duplicate pages", value: `${formatNumber(raw.duplicate_pages_pct)}%` },
+      ].filter((r) => r.value && r.value !== "—");
+    }
+    case "security": {
+      return [
+        { title: "HTTPS only",          value: raw.https_origin ? "✓ Yes" : "✗ No" },
+        { title: "No mixed content",    value: raw.no_mixed_content ? "✓ Yes" : "✗ No" },
+        { title: "HSTS",                value: raw.hsts ? "✓" : "✗" },
+        { title: "CSP",                 value: raw.csp ? "✓" : "✗" },
+        { title: "X-Frame-Options",     value: raw.x_frame_options ? "✓" : "✗" },
+        { title: "X-Content-Type-Options", value: raw.x_content_type_options ? "✓" : "✗" },
+        { title: "Referrer-Policy",     value: raw.referrer_policy ? "✓" : "✗" },
+        { title: "Permissions-Policy",  value: raw.permissions_policy ? "✓" : "✗" },
+      ];
+    }
+    case "mobile_a11y": {
+      const mobile = raw.mobile ?? {};
+      const a11y = raw.accessibility ?? {};
+      return [
+        { title: "Viewport meta",       value: `${formatNumber(mobile.viewport_meta_pct)}% pages` },
+        { title: "Responsive images",   value: `${formatNumber((mobile.responsive_image_ratio ?? 0) * 100)}% of imgs` },
+        { title: "Small fonts",         value: `${formatNumber(mobile.small_font_pages_pct)}% pages` },
+        { title: "Fixed-width containers", value: `${formatNumber(mobile.fixed_width_pages_pct)}% pages` },
+        { title: "alt-text coverage",   value: `${formatNumber((a11y.alt_text_coverage_avg ?? 0) * 100)}%` },
+        { title: "html lang set",       value: `${formatNumber(a11y.html_lang_pct)}% pages` },
+        { title: "Form labels coverage",value: `${formatNumber((a11y.form_label_ratio_avg ?? 0) * 100)}%` },
+        { title: "Skip-to-content link",value: a11y.has_skip_link ? "✓ found" : "✗ missing" },
+        { title: "<title> present",     value: `${formatNumber(a11y.title_present_pct)}% pages` },
+        { title: "avg ARIA attributes", value: formatNumber(a11y.aria_count_avg) },
+      ].filter((r) => r.value && r.value !== "—");
+    }
+    case "tech_modern": {
+      const d = raw ?? {};
+      const parts: { title: string; value: string }[] = [];
+      if (d.cms)              parts.push({ title: "CMS",              value: String(d.cms) });
+      if (d.js_framework)     parts.push({ title: "JS framework",     value: String(d.js_framework) });
+      if (d.css_framework)    parts.push({ title: "CSS framework",    value: String(d.css_framework) });
+      if (Array.isArray(d.hosting) && d.hosting.length) parts.push({ title: "Hosting", value: d.hosting.join(", ") });
+      if (d.server_header)    parts.push({ title: "Server header",    value: String(d.server_header) });
+      if (d.x_powered_by)     parts.push({ title: "X-Powered-By leaked", value: String(d.x_powered_by) });
+      if (Array.isArray(d.meta_generators) && d.meta_generators.length) parts.push({ title: "Meta generators", value: d.meta_generators.join(", ") });
+      return parts;
+    }
+    case "authority": {
+      const t = raw.traffic ?? {};
+      const o = raw.onpage ?? {};
+      const notes: string[] = [];
+      if (t.tranco) {
+        if (t.tranco.rank) notes.push(`Tranco #${formatNumber(t.tranco.rank)}${t.tranco.date ? ` (${t.tranco.date})` : ""}`);
+        else if (t.tranco.rank === null) notes.push("Tranco: not in top-1M (small site)");
+        else notes.push("Tranco: unavailable");
+      } else if (t.provider_notes?.tranco) notes.push(`Tranco: ${t.provider_notes.tranco}`);
+      if (t.open_page_rank) {
+        notes.push(`Open PageRank ${t.open_page_rank.rank}/10`);
+      } else if (t.provider_notes?.open_page_rank) {
+        notes.push(`OPR: ${t.provider_notes.open_page_rank}`);
+      }
+      const socials = o.socials ? Object.keys(o.socials) : [];
+      if (socials.length) notes.push(`Socials: ${socials.join(", ")}`);
+      if (Array.isArray(o.emails) && o.emails.length) notes.push(`Email: ${o.emails.length} found`);
+      if (Array.isArray(o.phones) && o.phones.length) notes.push(`Phone: ${o.phones.length} found`);
+      if (Array.isArray(o.addresses) && o.addresses.length) notes.push(`Address: ${o.addresses.length} found`);
+      return notes.map((v, i) => ({ title: i === 0 ? "Signals" : "", value: v }));
+    }
+    default:
+      return [];
+  }
+}
+
+function scoreColor(score: number) {
+  if (score >= 86) return "bg-emerald-500";
+  if (score >= 71) return "bg-emerald-400";
+  if (score >= 56) return "bg-amber-400";
+  if (score >= 31) return "bg-orange-500";
+  return "bg-red-500";
+}
+
+function percentBar(score: number) {
+  if (score >= 86) return "bg-gradient-to-r from-emerald-500 to-emerald-400";
+  if (score >= 71) return "bg-gradient-to-r from-emerald-400 to-lime-400";
+  if (score >= 56) return "bg-gradient-to-r from-amber-400 to-yellow-300";
+  if (score >= 31) return "bg-gradient-to-r from-orange-500 to-amber-400";
+  return "bg-gradient-to-r from-red-500 to-orange-400";
+}
+
+const catRows = buildCatRows();
+const overall = overallLabel(report);
+const overallMeta = overall?.meta ?? null;
+const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
+---
+
+<div id="audit-panel" data-lead-id={lead.id} class="space-y-6">
+  {/* HEADER: big rank + verdict + controls */}
+  <div class={`overflow-hidden rounded-xl border ${overallMeta ? overallMeta.border : 'border-border'} bg-card shadow-xs`}>
+    <div class="flex flex-wrap items-start gap-6 p-6">
+      {!report && (
+        <div class="flex-1 min-w-[260px]">
+          <div class="text-base font-semibold">Site Audit</div>
+          <p class="mt-1 text-sm text-muted-foreground">
+            {hasScrape
+              ? "No audit yet for this lead. Run one to get a multi-criteria 0–100 score, per-page issues, and a pitch verdict."
+              : "This lead hasn't been scraped yet. Run a site scrape first, then come back to audit."}
+          </p>
+          <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+            <li>SEO, performance, content depth, accessibility</li>
+            <li>Security headers (HSTS, CSP, X-Frame-Options, …)</li>
+            <li>Tranco popularity + social / contact signals</li>
+            <li>Multi-criteria weighted score with verdict bands</li>
+          </ul>
+        </div>
+      )}
+      {report && (
+        <div class="flex flex-1 items-center gap-6">
+          {/* Big score dial */}
+          <div class="relative h-32 w-32 shrink-0">
+            <svg viewBox="0 0 36 36" class="h-full w-full -rotate-90" aria-hidden="true">
+              <circle cx="18" cy="18" r="15.915" fill="none" stroke="currentColor" stroke-width="2.5" class="text-muted/30" />
+              <circle cx="18" cy="18" r="15.915" fill="none" stroke-width="2.5" stroke-linecap="round"
+                stroke={`url(#auditGrad)`} stroke-dasharray={`${pct} 100`} />
+              <defs>
+                <linearGradient id="auditGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="hsl(var(--color-primary))" />
+                  <stop offset="100%" stop-color="hsl(var(--color-primary) / 0.7)" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+              <div class="text-3xl font-bold tabular-nums leading-none">{report.overallRank}</div>
+              <div class="text-[10px] text-muted-foreground">/ 100</div>
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">Verdict</div>
+            <div class={`mt-1 inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-sm font-medium ${overallMeta ? overallMeta.bg : ''} ${overallMeta ? overallMeta.cls : ''}`}>
+              <span aria-hidden="true">{overallMeta?.emoji ?? ''}</span>
+              {report.verdictLabel ?? report.verdict}
+            </div>
+            {report.pitchAdvice && (
+              <p class="mt-2 text-sm text-foreground/85">{report.pitchAdvice}</p>
+            )}
+            <p class="mt-2 text-xs text-muted-foreground tabular-nums">
+              Run {durationLabel(report.durationMs ?? 0)} ·
+              {report.createdAt && (
+                <> {new Date(report.createdAt as any).toLocaleString("sr-RS")}</>
+              )}
+              {report.scrapeId != null && <> · scrape #{report.scrapeId}</>}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div class="ml-auto flex shrink-0 items-center gap-2">
+        <button type="button" data-audit-run
+          class="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-50">
+          {report ? "↻ Re-audit" : "Run audit now"}
+        </button>
+      </div>
+    </div>
+
+    {/* Live progress */}
+    <div data-audit-progress hidden
+      class="border-t border-border bg-muted/30 px-6 py-3 text-xs">
+      <div class="mb-1 flex items-center justify-between">
+        <span data-audit-progress-stage class="font-medium">Pokrećem…</span>
+        <span class="text-muted-foreground">audit može trajati 30–90 sekundi</span>
+      </div>
+      <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div data-audit-progress-bar class="h-full rounded-full bg-primary transition-all"
+          style="width: 100%; animation: pulse 1.5s ease-in-out infinite"></div>
+      </div>
+      <style>
+        @keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }
+      </style>
+    </div>
+  </div>
+
+  {/* TOP ISSUES */}
+  {report && Array.isArray(report.top_issues) && report.top_issues.length > 0 && (
+    <section class="rounded-xl border border-border bg-card p-5 shadow-xs">
+      <h3 class="text-sm font-semibold text-foreground">Top issues</h3>
+      <p class="mb-3 text-xs text-muted-foreground">Samo najuticajnije stavke, sortirane po težinskom udelu kategorije.</p>
+      <ul class="space-y-1.5 text-sm">
+        {report.top_issues.map((it) => (
+          <li class="flex items-start gap-2">
+            <span aria-hidden="true" class="mt-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
+            <span class="text-foreground/90">{it}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {/* CATEGORY BREAKDOWN */}
+  {report && catRows.length > 0 && (
+    <section class="rounded-xl border border-border bg-card p-5 shadow-xs">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold">Kategorije</h3>
+          <p class="text-xs text-muted-foreground">Težinski skor (score × weight) sabran u overall_rank.</p>
+        </div>
+        <div class="text-[10px] tabular-nums text-muted-foreground">
+          Σ weighted = {formatNumber(report.overallRank)} / 100
+        </div>
+      </div>
+      <ul class="space-y-3">
+        {catRows.map((c) => (
+          <li>
+            <div class="mb-1 flex items-center justify-between text-sm">
+              <span class="font-medium text-foreground/90">{c.label}</span>
+              <span class="tabular-nums text-xs text-muted-foreground">
+                <span class="font-semibold text-foreground">{c.score}</span>/100 ·
+                weight {Math.round(c.weight * 100)}% ·
+                weighted <span class="font-semibold text-foreground">{c.weighted.toFixed(1)}</span>
+              </span>
+            </div>
+            <div class="h-2.5 overflow-hidden rounded-full bg-muted/50">
+              <div class={`h-full rounded-full ${percentBar(c.score)} transition-all`} style={`width: ${Math.min(100, c.score)}%`}></div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {/* DETAILED METRICS — collapsible per category */}
+  {report && catRows.length > 0 && (
+    <section class="rounded-xl border border-border bg-card p-2 shadow-xs">
+      <h3 class="px-3 pt-3 text-sm font-semibold">Detaljne metrike</h3>
+      <p class="px-3 pb-1 text-xs text-muted-foreground">Klikni kategoriju da vidiš sve izmerene vrednosti.</p>
+      <div class="space-y-1">
+        {catRows.map((c) => {
+          const rows = formatRaw(c.key, c.raw);
+          return (
+            <details class="group rounded-md px-2 py-1 open:bg-muted/30">
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/40">
+                <div class="flex items-center gap-3">
+                  <span aria-hidden="true" class={`inline-block h-2 w-2 rounded-full ${scoreColor(c.score)}`}></span>
+                  <span class="text-sm font-medium">{c.label}</span>
+                  <span class="text-xs tabular-nums text-muted-foreground">{c.score}/100</span>
+                </div>
+                <span class="text-xs text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true">▸</span>
+              </summary>
+              <div class="px-3 pb-3">
+                {rows.length === 0 && c.issues.length === 0 && (
+                  <p class="py-2 text-xs text-muted-foreground">Nema dodatnih detalja za ovu kategoriju.</p>
+                )}
+                {rows.length > 0 && (
+                  <dl class="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-3">
+                    {rows.map((r) => (
+                      <div class="flex items-baseline justify-between gap-2 border-b border-dashed border-border/60 py-1">
+                        <dt class="text-muted-foreground">{r.title}</dt>
+                        <dd class="font-medium tabular-nums text-foreground/90">{r.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {c.issues.length > 0 && (
+                  <div class="mt-3">
+                    <div class="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Detektovani problemi ({c.issues.length})
+                    </div>
+                    <ul class="space-y-1 text-xs">
+                      {c.issues.map((it) => (
+                        <li class="flex items-start gap-2">
+                          <span class="mt-0.5 inline-block h-1 w-1 shrink-0 rounded-full bg-foreground/40"></span>
+                          <span class="text-foreground/85">{it}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  )}
+
+  {/* PER-PAGE TABLE */}
+  {report && Array.isArray(report.metrics?.pages) && (report.metrics.pages as any[]).length > 0 && (
+    <section class="rounded-xl border border-border bg-card p-5 shadow-xs">
+      <div class="mb-3 flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold">Stranice ({(report.metrics.pages as any[]).length})</h3>
+          <p class="text-xs text-muted-foreground">Sortirano po per-page score-u.</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto -mx-1 px-1">
+        <table class="w-full text-xs">
+          <thead class="text-left text-muted-foreground">
+            <tr class="border-b border-border">
+              <th class="px-2 py-1.5 font-medium">Score</th>
+              <th class="px-2 py-1.5 font-medium">URL</th>
+              <th class="px-2 py-1.5 font-medium text-right">TTFB</th>
+              <th class="px-2 py-1.5 font-medium text-right">Težina</th>
+              <th class="px-2 py-1.5 font-medium text-right">Issues</th>
+            </tr>
+          </thead>
+          <tbody>
+            {([...(report.metrics.pages as any[])].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))).map((p) => (
+              <tr class="border-b border-border/60 hover:bg-muted/30">
+                <td class="px-2 py-1.5">
+                  <span class={`inline-flex h-5 min-w-[28px] items-center justify-center rounded px-1.5 tabular-nums text-[11px] font-semibold ${p.score >= 80 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : p.score >= 50 ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300"}`}>{p.score}</span>
+                </td>
+                <td class="px-2 py-1.5">
+                  <a href={p.url} target="_blank" rel="noopener noreferrer" class="font-mono text-[11px] text-primary hover:underline break-all">
+                    {p.url.replace(/^https?:\/\//, "").slice(0, 80)}
+                  </a>
+                  {p.issues && p.issues.length > 0 && (
+                    <details class="mt-0.5">
+                      <summary class="cursor-pointer text-[10px] text-muted-foreground">+{p.issues.length} issues</summary>
+                      <ul class="mt-1 space-y-0.5 pl-3 text-[11px] text-foreground/80">
+                        {p.issues.map((i: string) => <li>• {i}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </td>
+                <td class="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{p.fetch_ms ? `${p.fetch_ms}ms` : "—"}</td>
+                <td class="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{p.page_weight_kb ? `${p.page_weight_kb} kB` : "—"}</td>
+                <td class="px-2 py-1.5 text-right tabular-nums">{Array.isArray(p.issues) ? p.issues.length : 0}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )}
+
+  {/* Sign-off / help footer */}
+  {report && (
+    <footer class="px-1 pt-2 text-[11px] text-muted-foreground">
+      <p>Audit #{report.id} · scrape #{report.scrapeId ?? "?"} · duration {durationLabel(report.durationMs ?? 0)}</p>
+    </footer>
+  )}
+</div>
+
+<script is:inline define:vars={{ leadId: lead.id, hasReport: !!report }}>
+  (function () {
+    const root = document.getElementById("audit-panel");
+    if (!root) return;
+    const progress = root.querySelector("[data-audit-progress]");
+    const stage = root.querySelector("[data-audit-progress-stage]");
+    let progressTick = null;
+
+    function getRunBtn() { return root.querySelector("[data-audit-run]"); }
+
+    function showProgress(yes) {
+      if (!progress) return;
+      progress.hidden = !yes;
+      if (yes) {
+        const stages = ["Pokrećem…", "Čekam scraper…", "Audit radi…"];
+        let i = 0;
+        if (progressTick) clearInterval(progressTick);
+        progressTick = setInterval(() => {
+          if (progress && !progress.hidden) {
+            stage.textContent = stages[i++ % stages.length];
+          } else if (progressTick) {
+            clearInterval(progressTick);
+            progressTick = null;
+          }
+        }, 1500);
+      } else if (progressTick) {
+        clearInterval(progressTick);
+        progressTick = null;
+      }
+    }
+
+    function setEnabled(yes) {
+      const btn = getRunBtn();
+      if (!btn) return;
+      btn.disabled = !yes;
+      btn.textContent = yes ? (hasReport ? "↻ Re-audit" : "Run audit now") : "⏳ Pokrećem…";
+    }
+
+    async function refreshPanel() {
+      try {
+        const pageR = await fetch(location.pathname + "?tab=audit", { headers: { Accept: "text/html" } });
+        const html = await pageR.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const fresh = doc.getElementById("audit-panel");
+        if (fresh) {
+          root.innerHTML = fresh.innerHTML;
+          wireRunButton();
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        showProgress(false);
+        setEnabled(true);
+      }
+    }
+
+    async function runAudit() {
+      setEnabled(false);
+      showProgress(true);
+      try {
+        const r = await fetch(`/api/site-audit/${leadId}/run`, { method: "POST" });
+        const d = await r.json();
+        if (!r.ok) {
+          if (stage) stage.textContent = "Greška: " + ((d && d.error) || r.statusText);
+          showProgress(true);
+          setTimeout(() => showProgress(false), 4500);
+          setEnabled(true);
+          return;
+        }
+        await refreshPanel();
+      } catch (e) {
+        if (stage) stage.textContent = "Greška: " + (e.message || e);
+        showProgress(true);
+        setTimeout(() => showProgress(false), 4500);
+        setEnabled(true);
+      }
+    }
+
+    function wireRunButton() {
+      const btn = getRunBtn();
+      if (!btn) return;
+      if (btn.__wired) return;
+      btn.__wired = true;
+      btn.addEventListener("click", runAudit);
+    }
+    wireRunButton();
+    // Expose for the parent page's tab-script to re-wire after innerHTML swaps
+    window.__auditRunHandler = function () { runAudit(); };
+  })();
+</script>

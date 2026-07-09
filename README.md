@@ -479,6 +479,9 @@ npm run build
 npx drizzle-kit generate   # generiši SQL iz schema.ts
 npm run db:migrate         # primeni
 
+# Custom SQL migracije (attachments, itd.)
+npm run db:migrate-attachments   # pokreće migrations/0001_attachments.sql (idempotentno)
+
 # Ručno pokreni scheduler tick (za testiranje bez čekanja intervala)
 curl -X POST http://localhost:3000/api/admin/tick
 
