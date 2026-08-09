@@ -2,6 +2,7 @@ import { listAudit } from "@/core/audit";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate } from "@/core/utils";
 import { Activity } from "lucide-react";
 
@@ -18,12 +19,9 @@ export default async function AuditPage({ searchParams }: Props) {
   const entries = listAudit({ limit, offset: (page - 1) * limit });
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
-        <p className="text-sm text-muted-foreground">Istorija promena u sistemu</p>
-      </div>
-
+    <div>
+      <PageHeader title="Audit log" subtitle="Istorija promena u sistemu" />
+      <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -62,6 +60,7 @@ export default async function AuditPage({ searchParams }: Props) {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

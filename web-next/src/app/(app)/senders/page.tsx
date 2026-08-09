@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate } from "@/core/utils";
 import { createSender, toggleSender, deleteSender } from "./actions";
 import { Send, Trash2 } from "lucide-react";
@@ -16,12 +17,9 @@ export default async function SendersPage() {
   const senders = db.select().from(schema.senders).all();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Senderi</h1>
-        <p className="text-sm text-muted-foreground">SMTP nalozi za slanje emailova</p>
-      </div>
-
+    <div>
+      <PageHeader title="Senderi" subtitle="SMTP nalozi za slanje emailova" />
+      <div className="space-y-6 p-4 md:p-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           {senders.length === 0 && (
@@ -111,6 +109,7 @@ export default async function SendersPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

@@ -4,9 +4,8 @@ import { eq, desc, sql } from "drizzle-orm";
 import { getDb, schema } from "@/core/db";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
 import { formatDate, formatNumber } from "@/core/utils";
-import { ArrowLeft } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -54,20 +53,14 @@ export default async function CampaignDetailPage({ params }: Props) {
     .all();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-      <div>
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/campaigns">
-            <ArrowLeft /> Sve kampanje
-          </Link>
-        </Button>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight">{campaign.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          {[campaign.category, campaign.city].filter(Boolean).join(" · ") || "Bez kategorije"} · kreirana{" "}
-          {formatDate(campaign.createdAt)}
-        </p>
-      </div>
-
+    <div>
+      <PageHeader
+        title={campaign.name}
+        subtitle={`${[campaign.category, campaign.city].filter(Boolean).join(" · ") || "Bez kategorije"} · kreirana ${formatDate(campaign.createdAt)}`}
+        backHref="/campaigns"
+        backLabel="Sve kampanje"
+      />
+      <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-5 text-center">
@@ -129,6 +122,7 @@ export default async function CampaignDetailPage({ params }: Props) {
             ))}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { getDb, schema } from "@/core/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate } from "@/core/utils";
 import { Inbox as InboxIcon } from "lucide-react";
 
@@ -30,12 +31,9 @@ export default async function InboxPage() {
     .all();
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Inbox</h1>
-        <p className="text-sm text-muted-foreground">Primljeni odgovori (IMAP reply tracking)</p>
-      </div>
-
+    <div>
+      <PageHeader title="Inbox" subtitle="Primljeni odgovori (IMAP reply tracking)" />
+      <div className="space-y-4 p-4 md:p-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -81,6 +79,7 @@ export default async function InboxPage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

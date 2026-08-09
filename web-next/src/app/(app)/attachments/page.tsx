@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate } from "@/core/utils";
 import { Paperclip, Upload, Download, Trash2 } from "lucide-react";
 import { deleteAttachmentAction } from "./actions";
@@ -21,12 +22,9 @@ export default async function AttachmentsPage() {
   const attachments = db.select().from(schema.attachments).all();
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Attachments</h1>
-        <p className="text-sm text-muted-foreground">Biblioteka email attachment-a (dedup po SHA-256)</p>
-      </div>
-
+    <div>
+      <PageHeader title="Attachments" subtitle="Biblioteka email attachment-a (dedup po SHA-256)" />
+      <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
       <Card>
         <CardHeader>
           <CardTitle>Upload</CardTitle>
@@ -82,6 +80,7 @@ export default async function AttachmentsPage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate } from "@/core/utils";
 import { saveTemplate, deleteTemplate } from "./actions";
 import { FileText, Trash2 } from "lucide-react";
@@ -25,12 +26,9 @@ export default async function TemplatesPage() {
   const templates = db.select().from(schema.promptTemplates).all();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Šabloni</h1>
-        <p className="text-sm text-muted-foreground">Prompt šabloni za AI personalizaciju</p>
-      </div>
-
+    <div>
+      <PageHeader title="Šabloni" subtitle="Prompt šabloni za AI personalizaciju" />
+      <div className="space-y-6 p-4 md:p-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           {templates.length === 0 && (
@@ -103,6 +101,7 @@ export default async function TemplatesPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

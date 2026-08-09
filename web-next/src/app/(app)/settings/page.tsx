@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
 import { saveSettings } from "./actions";
 import { Save } from "lucide-react";
 
@@ -13,12 +14,9 @@ export default async function SettingsPage() {
   const { groups } = groupSettings(getAllSettings());
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Podešavanja</h1>
-        <p className="text-sm text-muted-foreground">DB-backed podešavanja (DB → env → default)</p>
-      </div>
-
+    <div>
+      <PageHeader title="Podešavanja" subtitle="DB-backed podešavanja (DB → env → default)" />
+      <div className="mx-auto max-w-3xl p-4 md:p-6">
       <form action={saveSettings} className="space-y-6">
         {groups.map((g) => (
           <Card key={g.key}>
@@ -55,6 +53,7 @@ export default async function SettingsPage() {
           <Save /> Sačuvaj podešavanja
         </Button>
       </form>
+      </div>
     </div>
   );
 }

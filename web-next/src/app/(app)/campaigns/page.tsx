@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate, formatNumber } from "@/core/utils";
 import { Users, Plus } from "lucide-react";
 import { createCampaign } from "./actions";
@@ -32,12 +33,9 @@ export default async function CampaignsPage() {
     .all();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Kampanje</h1>
-        <p className="text-sm text-muted-foreground">{formatNumber(rows.length)} kampanja</p>
-      </div>
-
+    <div>
+      <PageHeader title="Kampanje" subtitle={`${formatNumber(rows.length)} kampanja`} />
+      <div className="space-y-4 p-4 md:p-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -92,6 +90,7 @@ export default async function CampaignsPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

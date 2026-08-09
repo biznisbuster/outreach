@@ -4,6 +4,7 @@ import { getDb, schema } from "@/core/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { formatDate, formatNumber } from "@/core/utils";
 import { QUEUE_STATUS_META, QUEUE_STATUS_ORDER } from "@/core/queueMeta";
 
@@ -50,12 +51,9 @@ export default async function QueuePage() {
     .all();
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Red slanja</h1>
-        <p className="text-sm text-muted-foreground">Emailovi po statusu</p>
-      </div>
-
+    <div>
+      <PageHeader title="Red slanja" subtitle="Emailovi po statusu" />
+      <div className="space-y-4 p-4 md:p-6">
       <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
         {QUEUE_STATUS_ORDER.map((s) => {
           const meta = QUEUE_STATUS_META[s];
@@ -111,6 +109,7 @@ export default async function QueuePage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

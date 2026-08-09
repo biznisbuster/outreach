@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
 import { formatNumber } from "@/core/utils";
 import { createStatus, deleteStatus } from "./actions";
 import { Trash2 } from "lucide-react";
@@ -31,12 +32,9 @@ export default async function StatusesPage() {
     .all();
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Statusi</h1>
-        <p className="text-sm text-muted-foreground">Pipeline statusi za leadove</p>
-      </div>
-
+    <div>
+      <PageHeader title="Statusi" subtitle="Pipeline statusi za leadove" />
+      <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -89,6 +87,7 @@ export default async function StatusesPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );
