@@ -1,6 +1,5 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import fs from "node:fs";
 import * as schema from "./schema";
@@ -11,6 +10,9 @@ import * as schema from "./schema";
  *
  * Next automatski učitava .env / .env.local u process.env — dotenv nije potreban.
  * DATABASE_URL je relativan u odnosu na web-next/ (npr. file:../data/outreach.db).
+ *
+ * Šema je 1:1 sa gui-astro; postojeća baza je već potpuno migrirana, pa se
+ * struktura garantuje belt-and-suspenders CREATE TABLE IF NOT EXISTS blokom.
  */
 
 declare global {
@@ -41,21 +43,6 @@ function createConnection() {
   raw.pragma("foreign_keys = ON");
 
   const db = drizzle(raw, { schema });
-
-  // Migracije ako postoje (web-next/drizzle ili nasleđeni gui-astro folderi).
-  const candidates = [
-    path.join(process.cwd(), "drizzle"),
-    path.resolve(process.cwd(), "..", "gui-astro", "drizzle"),
-    path.resolve(process.cwd(), "..", "gui-astro", "migrations"),
-  ];
-  const migrationsFolder = candidates.find((c) => fs.existsSync(c));
-  if (migrationsFolder) {
-    try {
-      migrate(db, { migrationsFolder });
-    } catch (e) {
-      console.error("[db] migration warning:", e);
-    }
-  }
 
   raw.exec(`
     CREATE TABLE IF NOT EXISTS audit_log (
