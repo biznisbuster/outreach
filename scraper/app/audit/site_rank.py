@@ -22,14 +22,19 @@ from dataclasses import dataclass
 # Weights (must sum to 1.0)
 # ---------------------------------------------------------------------------
 
+# UI/Design kategorija (ai_vision) je dodata 2026-07. Težine su preraspodeljene
+# da zbir ostane 1.00: mobile_a11y 0.10 → 0.08, tech_modern 0.05 → 0.04,
+# authority 0.10 → 0.08. SEO/Performance/Content/Security zadržavaju original
+# težine jer su i dalje ključne za cold-outreach pitch.
 WEIGHTS = {
     "seo":          0.25,
     "performance":  0.20,
     "content":      0.20,
     "security":     0.10,
-    "mobile_a11y":  0.10,
-    "tech_modern":  0.05,
-    "authority":    0.10,
+    "mobile_a11y":  0.08,
+    "tech_modern":  0.04,
+    "authority":    0.08,
+    "ui_design":    0.05,
 }
 
 

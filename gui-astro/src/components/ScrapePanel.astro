@@ -167,6 +167,10 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       </div>
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-success" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
     </div>
+
+    <!-- Preview lista pronađenih leadova (pre importa) -->
+    <div id="scrape-preview" class="hidden"></div>
+
     <div class="flex flex-wrap items-center gap-2 pt-2">
       <button type="button" id="import-btn" class="inline-flex h-9 items-center rounded-md bg-success px-4 text-sm font-medium text-success-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-50">
         Uvezi sve u kampanju
@@ -238,6 +242,24 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       captcha: "Captcha",
     };
 
+    // Mapiranje sub-stage-ova (koje scraper emituje: screenshot, contact,
+    // google_fallback, email) na DISPLAY stage u stepper-u/countu. Svi ovi
+    // su deo "Detalji" faze iz korisničke perspektive — u suprotnom stepper
+    // flickuje između "Detalji" i ničega svaki put kad dođe screenshot event.
+    var STAGE_DISPLAY_MAP = {
+      startup: "startup",
+      search: "search",
+      detail: "detail",
+      screenshot: "detail",
+      contact: "detail",
+      google_fallback: "detail",
+      email: "detail",
+      captcha: "captcha",
+      export: "export",
+      done: "done",
+    };
+    function displayStage(s) { return STAGE_DISPLAY_MAP[s] || s; }
+
     // STATE: drži listu query-eva i akumulirane redove za bulk import
     var STATE = {
       queries: [],            // ["cvecare beograd", "cvecare krusevac"]
@@ -250,6 +272,14 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       total: 0,
       evList: [],
       stopped: false,
+      _lastEvSig: "",         // dedup potpis zadnjeg eventa (sprečava replay)
+      _detailStartTs: 0,      // kada je počela detail faza (za realan ETA)
+      _detailStarted: false,  // da li smo ušli u detail fazu
+      _maxCount: 0,           // monotonic count — nikad ne pada, prati cumulative
+      _maxPct: 0,             // monotonic progress — bar nikad ne pada unazad
+      _lastDisplayStage: "",  // poslednji display stage (za skip nepotrebnih setStage poziva)
+      _emaRate: null,         // exponential moving average rate biznisa/ms (za stabilan ETA)
+      _lastEtaUpdate: 0,      // throttling: ne ažuriraj ETA DOM češće od 2s
     };
 
     var reloadTimer = null;   // auto-reload nakon uspešnog importa
@@ -261,6 +291,14 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
     var CHECK_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
     function setStage(s) {
+      var raw = s;
+      s = displayStage(s);
+      // CRITICAL: Ako se display stage NIJE PROMENIO, ne diramo DOM. Ovo
+      // sprečava flicker pipelne indikatotra na screenshot/contact/email
+      // eventima — svi se mapiraju na "detail" pa setStage("screenshot")
+      // postaje no-op za DOM.
+      if (s === STATE._lastDisplayStage) return;
+      STATE._lastDisplayStage = s;
       var stages = ["startup", "search", "detail", "email", "export", "done"];
       var reached = false;
       for (var i = 0; i < stages.length; i++) {
@@ -337,23 +375,89 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       return m + "m " + String(ss).padStart(2, "0") + "s";
     }
 
-    function setEta(done, total, elapsedMs) {
-      if (done > 0 && total && total > done && elapsedMs > 0) {
-        var rate = done / elapsedMs;
-        var remaining = (total - done) / rate;
-        var sm = Math.round(remaining / 1000);
-        if (sm < 60) eta.textContent = "ETA: ~" + sm + "s";
-        else eta.textContent = "ETA: ~" + Math.floor(sm / 60) + "m " + (sm % 60) + "s";
-      } else if (done === total && total > 0) {
+    function setEta(done, total, stage) {
+      // ETA računamo samo za "detail" display-stage (glavna faza). Van nje
+      // (startup/search/export/done), ne prikazujemo ništa.
+      if (stage !== "detail") {
+        if (done >= total && total > 0) eta.textContent = "Završeno";
+        else eta.textContent = "";
+        STATE._emaRate = null;
+        return;
+      }
+      // Ako ne znamo total još (search/end tek treba stići), prikaži
+      // "računam…" — bez besmislenih procena.
+      if (!total || total <= 0 || !STATE._detailStartTs) {
+        eta.textContent = "ETA: računam…";
+        return;
+      }
+      // Završeno
+      if (done >= total) {
         eta.textContent = "Završeno";
+        STATE._emaRate = null;
+        return;
+      }
+      // Premalo uzoraka za stabilan rate (treba bar ~3s da bi rate bio smislen)
+      var now = Date.now();
+      var detailElapsed = now - STATE._detailStartTs;
+      if (detailElapsed < 2000) {
+        eta.textContent = "ETA: računam…";
+        return;
+      }
+      // EMA — exponential moving average — zaglađuje rate između polova da
+      // ETA ne treperi (npr. 3m20s → 3m18s → 3m22s svakih 1.5s).
+      var currentRate = done / detailElapsed; // biznisa / ms
+      var alpha = 0.3;
+      STATE._emaRate = (STATE._emaRate == null)
+        ? currentRate
+        : alpha * currentRate + (1 - alpha) * STATE._emaRate;
+      // Throttle: ne ažuriraj DOM češće od 2s (inače tekst treperi)
+      if (STATE._lastEtaUpdate && now - STATE._lastEtaUpdate < 2000) return;
+      STATE._lastEtaUpdate = now;
+
+      if (STATE._emaRate > 0) {
+        var remaining = (total - done) / STATE._emaRate; // ms
+        var sm = Math.round(remaining / 1000);
+        // Cap na 99m da ne piše "1h 23m" kad je zapravo samo ~90min.
+        if (sm <= 0) eta.textContent = "ETA: <1s";
+        else if (sm < 60) eta.textContent = "ETA: ~" + sm + "s";
+        else eta.textContent = "ETA: ~" + Math.min(99, Math.floor(sm / 60)) + "m " + String(sm % 60).padStart(2, "0") + "s";
       } else {
-        eta.textContent = "";
+        eta.textContent = "ETA: računam…";
       }
     }
 
     function addEv(ev) {
+      // Dedup: ne dodaj isti event dva puta. Poll vraća last_event svakih
+      // 1.5s i bez ove provere bi se isti red pojavio "milion puta" u log-u.
+      var sig = ev.stage + "/" + ev.event + "/" + ev.count + "/" + (ev.message || "");
+      if (STATE._lastEvSig === sig) return;
+      STATE._lastEvSig = sig;
       STATE.evList.unshift(ev);
       if (STATE.evList.length > 10) STATE.evList.length = 10;
+      events.innerHTML = STATE.evList.map(function (e) {
+        var d = new Date(e.timestamp || Date.now()).toLocaleTimeString();
+        return "<li><span class='text-muted-foreground/70'>" + d + "</span> <span class='text-foreground/80'>[" + e.stage + "/" + e.event + "]</span> " + (e.message || "") + "</li>";
+      }).join("");
+    }
+
+    // Render event log iz pune istorije (events[] iz snapshot-a) — koristi se
+    // na početku svakog job-a da se prikaže sve što se desilo, bez replay-a.
+    function renderEventHistory(evList) {
+      if (!evList || !evList.length) return;
+      var seen = {};
+      var deduped = [];
+      for (var i = evList.length - 1; i >= 0; i--) {
+        var e = evList[i];
+        var sig = e.stage + "/" + e.event + "/" + e.count + "/" + (e.message || "");
+        if (seen[sig]) continue;
+        seen[sig] = true;
+        deduped.unshift(e);
+      }
+      // zadnjih 10, najnoviji prvi
+      STATE.evList = deduped.slice(-10).reverse();
+      STATE._lastEvSig = evList[evList.length - 1]
+        ? evList[evList.length - 1].stage + "/" + evList[evList.length - 1].event + "/" + evList[evList.length - 1].count + "/" + (evList[evList.length - 1].message || "")
+        : "";
       events.innerHTML = STATE.evList.map(function (e) {
         var d = new Date(e.timestamp || Date.now()).toLocaleTimeString();
         return "<li><span class='text-muted-foreground/70'>" + d + "</span> <span class='text-foreground/80'>[" + e.stage + "/" + e.event + "]</span> " + (e.message || "") + "</li>";
@@ -412,10 +516,14 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
     }
 
     function resetUI() {
+      if (reloadTimer) { clearInterval(reloadTimer); reloadTimer = null; }
       STATE = {
         queries: [], currentIndex: 0, jobIds: [], jobs: [],
         allRows: [], pollHandle: null, startTs: 0, total: 0,
         evList: [], stopped: false,
+        _lastEvSig: "", _detailStartTs: 0, _detailStarted: false,
+        _maxCount: 0, _maxPct: 0, _lastDisplayStage: "",
+        _emaRate: null, _lastEtaUpdate: 0,
       };
       stopRequested = false;
       msg.textContent = "";
@@ -450,6 +558,14 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       // Reset progress za ovaj job
       STATE.total = 0;
       STATE.evList = [];
+      STATE._lastEvSig = "";
+      STATE._detailStartTs = 0;
+      STATE._detailStarted = false;
+      STATE._maxCount = 0;
+      STATE._maxPct = 0;
+      STATE._lastDisplayStage = "";
+      STATE._emaRate = null;
+      STATE._lastEtaUpdate = 0;
       events.innerHTML = "";
       msg.textContent = "";
       count.textContent = "0 / ?";
@@ -488,6 +604,94 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
 
     // === poll single job until done ===
 
+    // Centralizovano računanje monotonic progresije (count + bar + stage).
+    // Ključni principi:
+    //   1. count.text i bar.width NIKAD ne idu UNAZAD tokom jednog job-a.
+    //   2. _maxCount prati KUMULATIVNI broj biznisa (dolazi iz detail/start i
+    //      detail/end eventa). screenshot/contact/google_fallback eventi
+    //      imaju count=0 ili count=emailed — ignorišu se za prikaz.
+    //   3. Bar se računa iz _maxCount / STATE.total (ne iz ev.count direktno).
+    //   4. Steper koristi displayStage() mapu — sub-stages ne menjaju vizuel.
+    // Centralizovano računanje monotonic progresije (count + bar + stage).
+    // Ključni principi:
+    //   1. count.text i bar.width NIKAD ne idu UNAZAD tokom jednog job-a.
+    //   2. STATE.total je ROBUSNO izveden iz pune istorije događaja
+    //      (snap.events), ne samo iz last_event. Razlog: scraper emituje
+    //      search/end samo jednom, a last_event se prepisuje svakim emitom.
+    //      Polling svakih 1.5s može nikad ne videti search/end kao last_event
+    //      (ako scraper radi brzo) — pa STATE.total ostane 0 i prikazuje "?".
+    //   3. _maxCount prati KUMULATIVNI broj biznisa (dolazi iz detail/start i
+    //      detail/end eventa). screenshot/contact/google_fallback eventi
+    //      imaju count=0 ili count=emailed — ignorišu se za prikaz.
+    //   4. Bar se računa iz _maxCount / STATE.total (ne iz ev.count direktno).
+    //   5. Steper koristi displayStage() mapu — sub-stages ne menjaju vizuel.
+    function applyProgress(ev, allEvents) {
+      if (!ev && !allEvents) return;
+
+      // ROBUSNO IZVLAČENJE TOTAL: prvo skeniraj celu istoriju događaja
+      // i zaključaj STATE.total čim nađeš bilo koji event sa total > 0.
+      // Pošto je search/end emitovan rano u toku, a kasniji detail/end
+      // imaju isti total (=len(urls)), dovoljno je jedno skeniranje.
+      if (allEvents) {
+        for (var i = 0; i < allEvents.length; i++) {
+          var eh = allEvents[i];
+          if (eh && eh.total && eh.total > 0 && (
+            eh.stage === "search" || eh.stage === "detail" ||
+            eh.stage === "export" || eh.stage === "done"
+          )) {
+            STATE.total = eh.total;
+            break;
+          }
+        }
+      }
+      // Takođe probaj iz samog ev (za slučaj prazne events liste)
+      if (ev && ev.total && ev.total > 0 && !STATE.total) {
+        STATE.total = ev.total;
+      }
+
+      var rawStage = ev && ev.stage;
+      var ds = ev ? displayStage(rawStage) : null;
+      var ec = ev ? (ev.count || 0) : 0;
+
+      // search/end: zaključaj total = broj pronađenih URL-ova, bar ide na 100%
+      if (ev && rawStage === "search" && ev.event === "end") {
+        STATE._maxCount = Math.max(STATE._maxCount, ec);
+        STATE._maxPct = 100;
+      }
+      // detail faza — glavni rad, cumulative count
+      else if (ds === "detail") {
+        if (!STATE._detailStarted) {
+          STATE._detailStarted = true;
+          if (!STATE._detailStartTs) STATE._detailStartTs = Date.now();
+          STATE._maxCount = 0;
+          STATE._maxPct = 0;
+        }
+        // Samo detail/start i detail/end imaju cumulative count.
+        // screenshot/contact/google_fallback imaju count=0 ili count=emailed.
+        if (rawStage === "detail" && (ev.event === "start" || ev.event === "end" || ev.event === "skip" || ev.event === "error")) {
+          STATE._maxCount = Math.max(STATE._maxCount, ec);
+        }
+        if (STATE.total) {
+          var npct = Math.min(100, Math.round((STATE._maxCount / STATE.total) * 100));
+          STATE._maxPct = Math.max(STATE._maxPct, npct);
+        }
+      }
+      // export/done: 100%
+      else if (ds === "export" || ds === "done") {
+        if (STATE.total) STATE._maxCount = STATE.total;
+        STATE._maxPct = 100;
+      }
+      // startup: ne diramo progres (pokazuje 0/? dok ne krene search)
+
+      // Ažuriraj DOM — uvek monotonic
+      count.textContent = STATE._maxCount + " / " + (STATE.total || "?");
+      bar.style.width = STATE._maxPct + "%";
+      if (ev) {
+        msg.textContent = "[" + ds + "] " + (ev.message || ev.event);
+        phaseLabel.textContent = STAGE_LABEL[ds] || ds;
+      }
+    }
+
     function waitForJobFinish(jobId) {
       return new Promise(function (resolve) {
         var job = STATE.jobs[STATE.jobs.length - 1];
@@ -501,17 +705,23 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
             .then(function (r) { return r.ok ? r.json() : null; })
             .catch(function () { return null; })
             .then(function (pd) {
-              var ev = pd && pd.snapshot && pd.snapshot.last_event;
-              if (ev) {
-                STATE.total = ev.total || STATE.total;
-                count.textContent = ev.count + (STATE.total ? " / " + STATE.total : "");
-                var pct = STATE.total ? Math.min(100, Math.round(ev.count / STATE.total * 100)) : 0;
-                bar.style.width = pct + "%";
-                msg.textContent = "[" + ev.stage + "] " + (ev.message || ev.event);
-                phaseLabel.textContent = STAGE_LABEL[ev.stage] || ev.stage;
-                addEv(ev);
-                setStage(ev.stage);
-                setEta(ev.count, STATE.total, Date.now() - STATE.startTs);
+              var snap = pd && pd.snapshot;
+              var ev = snap && snap.last_event;
+              // Render pune istorije eventa (ako scraper šalje events[]) —
+              // prikazuje SVE šta se desilo, bez replay-a last_event-a.
+              if (snap && snap.events && snap.events.length) {
+                renderEventHistory(snap.events);
+              }
+              if (ev || (snap && snap.events && snap.events.length)) {
+                // applyProgress: monotonic count + monotonic bar + mapiran stage.
+                // Prosleđujemo i snap.events jer STATE.total mora da se izvuče
+                // iz celokupne istorije (search/end se može preskočiti u last_event).
+                applyProgress(ev, snap && snap.events);
+                if (ev) {
+                  addEv(ev);
+                  setStage(ev.stage);
+                  setEta(STATE._maxCount, STATE.total, displayStage(ev.stage));
+                }
               }
               return fetch("/api/scrape-leads/status/" + jobId, { headers: { "Origin": location.origin } });
             })
@@ -619,6 +829,7 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
       pipeline.classList.add("hidden");
       donePanel.classList.remove("hidden");
       if (success && STATE.allRows.length > 0) {
+        renderPreview(STATE.allRows);
         importBtn.disabled = false;
         importBtn.classList.remove("hidden");
         importBtn.textContent = "Uvezi sve u kampanju (" + STATE.allRows.length + ")";
@@ -627,15 +838,70 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
         importBtn.disabled = true;
         importBtn.textContent = "Nema rezultata za uvoz";
       }
+      // Skroluj do done panel-a da korisnik odmah vidi rezultate.
+      try { donePanel.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+    }
+
+    // Renderuje preview tabelu pronađenih leadova — korisnik ODMAH vidi šta je
+    // scrape našao (ime, telefon, website, email, ocena) pre nego što uvozi.
+    function renderPreview(rows) {
+      var box = document.getElementById("scrape-preview");
+      if (!box || !rows || !rows.length) { if (box) box.classList.add("hidden"); return; }
+
+      var withEmail = rows.filter(function (r) { return r.email && r.email.trim(); }).length;
+      var withPhone = rows.filter(function (r) { return (r.phone_e164 || r.phone_raw || "").trim(); }).length;
+      var withWeb = rows.filter(function (r) { return (r.website || "").trim(); }).length;
+
+      var html = '<div class="rounded-md border border-border bg-background/60">';
+      html += '<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-xs text-muted-foreground">';
+      html += '<span class="font-medium text-foreground">' + rows.length + ' leadova</span>';
+      html += '<span>📞 ' + withPhone + '</span>';
+      html += '<span>🌐 ' + withWeb + '</span>';
+      html += '<span>✉ ' + withEmail + '</span>';
+      html += '</div>';
+      html += '<div class="max-h-72 overflow-y-auto">';
+      html += '<table class="w-full text-xs"><thead class="sticky top-0 bg-muted/80 text-left uppercase tracking-wide text-muted-foreground">';
+      html += '<tr><th class="px-3 py-1.5 font-medium">Naziv</th><th class="px-3 py-1.5 font-medium">Telefon</th><th class="px-3 py-1.5 font-medium">Website</th><th class="px-3 py-1.5 font-medium">Email</th><th class="px-3 py-1.5 font-medium text-right">★</th></tr>';
+      html += '</thead><tbody class="divide-y divide-border">';
+      rows.forEach(function (r) {
+        var phone = (r.phone_raw || r.phone_e164 || "").trim();
+        var web = (r.website || "").trim();
+        var email = (r.email || "").trim();
+        var rating = r.rating ? "★" + r.rating : "";
+        var cityTxt = r.city ? " · " + r.city : "";
+        // Skrati website za prikaz
+        var webShort = web.replace(/^https?:\/\//, "").replace(/^www\./, "");
+        if (webShort.length > 32) webShort = webShort.slice(0, 30) + "…";
+        html += '<tr class="hover:bg-accent/40">';
+        html += '<td class="px-3 py-1.5 font-medium text-foreground">' + escHtml(r.name || "") + '<span class="text-muted-foreground">' + escHtml(cityTxt) + '</span></td>';
+        html += '<td class="px-3 py-1.5 tabular-nums ' + (phone ? "text-foreground" : "text-muted-foreground/40") + '">' + escHtml(phone || "—") + '</td>';
+        html += '<td class="px-3 py-1.5 ' + (web ? "text-primary" : "text-muted-foreground/40") + '">' + (web ? '<a href="' + escAttr(web) + '" target="_blank" rel="noopener" class="hover:underline">' + escHtml(webShort) + '</a>' : "—") + '</td>';
+        html += '<td class="px-3 py-1.5 ' + (email ? "text-foreground" : "text-muted-foreground/40") + '">' + (email ? '<a href="mailto:' + escAttr(email) + '" class="hover:underline">' + escHtml(email) + '</a>' : "—") + '</td>';
+        html += '<td class="px-3 py-1.5 text-right tabular-nums ' + (rating ? "text-warning" : "text-muted-foreground/40") + '">' + (rating || "—") + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div></div>';
+      box.innerHTML = html;
+      box.classList.remove("hidden");
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    function escAttr(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     }
 
     function showReloadCta() {
-      // Sakrij import dugme, prikaži "Pogledaj rezultate" + "Novi scrape"
+      // Sakrij import dugme i preview, prikaži "Pogledaj rezultate".
       importBtn.classList.add("hidden");
+      var preview = document.getElementById("scrape-preview");
+      if (preview) preview.classList.add("hidden");
       reloadBtn.classList.remove("hidden");
+      reloadBtn.textContent = "Pogledaj rezultate";
       // Ako korisnik klikne pre auto-reload-a, otkaži timer
       reloadBtn.addEventListener("click", function () {
-        if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+        if (reloadTimer) { clearInterval(reloadTimer); reloadTimer = null; }
         window.location.reload();
       }, { once: true });
     }
@@ -699,12 +965,22 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
             showDuplicateDetails(id.duplicateDetails, id.duplicates);
           }
 
-          // Auto-reload posle 1.5s da se vidi novi sadržaj (broj leadova,
+          // Auto-reload posle 2s da se vidi novi sadržaj (broj leadova,
           // status distribucija, poslednjih 50 leadova — sve je SSR u Astro-u,
-          // pa ne možemo da apdejtujemo bez roundtrip-a).
-          reloadTimer = setTimeout(function () {
-            window.location.reload();
-          }, 1500);
+          // pa ne možemo da apdejtujemo bez roundtrip-a). Countdown u dugmetu
+          // daje korisniku jasnu povratnu vezu da se nešto dešava.
+          var countdown = 2;
+          reloadBtn.textContent = "Pogledaj rezultate (" + countdown + "s)";
+          reloadTimer = setInterval(function () {
+            countdown--;
+            if (countdown <= 0) {
+              clearInterval(reloadTimer);
+              reloadTimer = null;
+              window.location.reload();
+              return;
+            }
+            reloadBtn.textContent = "Pogledaj rezultate (" + countdown + "s)";
+          }, 1000);
         } else {
           importBtn.textContent = "Greška: " + (id.error || ir.statusText);
           importBtn.disabled = false;
@@ -745,7 +1021,7 @@ const { defaultQuery = "", buttonLabel = "Pokreni scrape", compact = false } = A
 
     restartBtn.addEventListener("click", function () {
       // Ako je u toku auto-reload, otkaži
-      if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+      if (reloadTimer) { clearInterval(reloadTimer); reloadTimer = null; }
       resetUI();
       // očisti i tekstualni unos? ostavi — korisnik obično hoće isti query
     });

@@ -81,6 +81,48 @@ _COOKIE_TEXT_RE = re.compile(
 )
 
 
+# Open Graph meta tags (Facebook, LinkedIn, Discord…) — važno za share preview-e
+_OG_TITLE_RE = re.compile(r'<meta\b[^>]*\bproperty=["\']og:title["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_OG_DESCRIPTION_RE = re.compile(r'<meta\b[^>]*\bproperty=["\']og:description["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_OG_IMAGE_RE = re.compile(r'<meta\b[^>]*\bproperty=["\']og:image["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_OG_TYPE_RE = re.compile(r'<meta\b[^>]*\bproperty=["\']og:type["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_OG_URL_RE = re.compile(r'<meta\b[^>]*\bproperty=["\']og:url["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+
+# Twitter Card tags (X/Twitter)
+_TW_CARD_RE = re.compile(r'<meta\b[^>]*\bname=["\']twitter:card["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_TW_TITLE_RE = re.compile(r'<meta\b[^>]*\bname=["\']twitter:title["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_TW_DESCRIPTION_RE = re.compile(r'<meta\b[^>]*\bname=["\']twitter:description["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+_TW_IMAGE_RE = re.compile(r'<meta\b[^>]*\bname=["\']twitter:image["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+
+# Hreflang — multilingual / region-specific SEO signal
+_HREFLANG_RE = re.compile(r'<link\b[^>]*\brel=["\']alternate["\'][^>]*\bhreflang=["\']([^"\']+)["\']', re.IGNORECASE)
+_HREFLANG_BASE = re.compile(r'<link\b[^>]*\brel=["\']alternate["\'][^>]*\bhreflang=["\']x-default["\']', re.IGNORECASE)
+
+# Meta robots — direktna indexiranje kontrola
+_META_ROBOTS_RE = re.compile(r'<meta\b[^>]*\bname=["\']robots["\'][^>]*\bcontent=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _extract_meta_meta(html: str) -> dict:
+    """Ekstraktuje ključne SEO meta tagove (OG, Twitter, hreflang, robots)."""
+    out = {
+        "og_title":       (_OG_TITLE_RE.search(html) or [None, None])[1],
+        "og_description": (_OG_DESCRIPTION_RE.search(html) or [None, None])[1],
+        "og_image":       (_OG_IMAGE_RE.search(html) or [None, None])[1],
+        "og_type":        (_OG_TYPE_RE.search(html) or [None, None])[1],
+        "og_url":         (_OG_URL_RE.search(html) or [None, None])[1],
+        "twitter_card":   (_TW_CARD_RE.search(html) or [None, None])[1],
+        "twitter_title":  (_TW_TITLE_RE.search(html) or [None, None])[1],
+        "twitter_description": (_TW_DESCRIPTION_RE.search(html) or [None, None])[1],
+        "twitter_image":  (_TW_IMAGE_RE.search(html) or [None, None])[1],
+        "meta_robots":    (_META_ROBOTS_RE.search(html) or [None, None])[1],
+    }
+    # Hreflang list
+    hreflangs = _HREFLANG_RE.findall(html or "")
+    out["hreflangs"] = _uniq(hreflangs)
+    out["hreflang_x_default"] = bool(_HREFLANG_BASE.search(html or ""))
+    return out
+
+
 def audit_onpage(pages: list[dict]) -> OnpageResult:
     if not pages:
         return OnpageResult(raw={"empty": True}, score=0, issues=["No pages."])
@@ -122,6 +164,18 @@ def audit_onpage(pages: list[dict]) -> OnpageResult:
         "analytics_present": any(analytics.values()),
     }
 
+    # 7) Open Graph + Twitter Card meta tagovi (za share preview na FB, X,
+    #    LinkedIn, Discord, Slack…) — kritični za cold outreach jer share-ovani
+    #    link u email-u/WhatsApp-u/Slack-u mora imati kvalitetan preview.
+    og = _extract_meta_meta(homepage_html)
+    og_count = sum(1 for k in ("og_title", "og_description", "og_image") if og.get(k))
+    checks["og_complete"] = og_count == 3
+    checks["og_partial"] = og_count >= 1
+    twitter_count = sum(1 for k in ("twitter_card", "twitter_title", "twitter_description") if og.get(k))
+    checks["twitter_card_present"] = twitter_count >= 1
+    checks["hreflang_present"] = len(og.get("hreflangs", [])) >= 2
+    checks["meta_robots_present"] = bool(og.get("meta_robots"))
+
     score = _score_checks(checks, social_count=social_count)
     raw = {
         "emails": emails,
@@ -133,6 +187,11 @@ def audit_onpage(pages: list[dict]) -> OnpageResult:
         "chat_widgets": chat,
         "cdn_or_waf": cdn,
         "cookie_banner_present": cookie_banner,
+        # OG / Twitter / hreflang signal — korisno za outreach pitch
+        # ("ako šerujete ovaj link na FB-u, korisnik neće videti preview")
+        "og_tags": og,
+        "og_present_count": og_count,
+        "twitter_tags_count": twitter_count,
     }
     issues = _issues_for(checks, raw)
     return OnpageResult(raw=raw, score=score, issues=issues)
@@ -195,21 +254,29 @@ def _score_checks(checks: dict, social_count: int) -> int:
     # Phone (20)
     if checks["phone_present"]:
         score += 20
-    # Address (15)
+    # Address (10)
     if checks["address_present"]:
-        score += 15
-    # Socials (30) — strong signal that the business is real
-    if social_count >= 4:
-        score += 30
-    elif social_count >= 3:
-        score += 24
-    elif social_count >= 2:
-        score += 18
-    elif social_count >= 1:
         score += 10
-    # Analytics (15)
+    # Socials (25) — strong signal that the business is real
+    if social_count >= 4:
+        score += 25
+    elif social_count >= 3:
+        score += 20
+    elif social_count >= 2:
+        score += 14
+    elif social_count >= 1:
+        score += 8
+    # Analytics (10)
     if checks["analytics_present"]:
+        score += 10
+    # Open Graph (15) — kompletni set = 15, partial = 8
+    if checks.get("og_complete"):
         score += 15
+    elif checks.get("og_partial"):
+        score += 8
+    # Twitter Card (5)
+    if checks.get("twitter_card_present"):
+        score += 5
     return min(100, score)
 
 
@@ -228,4 +295,20 @@ def _issues_for(checks: dict, raw: dict) -> list[str]:
         out.append(f"Only {sc} social-media profile link. Multi-channel presence is recommended.")
     if not checks["analytics_present"]:
         out.append("No analytics platform detected — site traffic is invisible to the owner.")
+    # OG / Twitter / hreflang — share preview u outreach komunikaciji
+    og = raw.get("og_tags") or {}
+    if checks.get("og_complete"):
+        pass  # sve OK
+    elif checks.get("og_partial"):
+        out.append(
+            "Open Graph meta tagovi su nekompletni — share preview na Facebook/LinkedIn/WhatsApp/Slack "
+            "neće imati dobar preview (nedostaju og:title/description/image)."
+        )
+    else:
+        out.append(
+            "Nema Open Graph meta tagova — deljeni link neće imati preview na društvenim mrežama "
+            "i u porukama (Facebook, X, LinkedIn, Slack)."
+        )
+    if not checks.get("twitter_card_present"):
+        out.append("Twitter Card meta tagovi nisu podešeni — deljenje na X/Twitter nema preview.")
     return out

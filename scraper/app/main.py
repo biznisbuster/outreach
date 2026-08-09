@@ -19,6 +19,16 @@ from .categorize import filter_pages
 from .screenshot import capture_screenshot, _default_screenshots_dir
 from .jobs import create_job, get_job, update_job, job_to_dict
 from .audit import runner as audit_runner
+from .audit_jobs import (
+    create_audit_job,
+    get_audit_job,
+    update_audit_job,
+    audit_job_to_dict,
+    start_cleanup_loop,
+)
+
+
+MAX_PAGES = int(os.environ.get("MAX_PAGES_PER_LEAD", "30"))
 
 MAX_PAGES = int(os.environ.get("MAX_PAGES_PER_LEAD", "30"))
 SCREENSHOTS_DIR = os.environ.get("SCREENSHOTS_DIR") or _default_screenshots_dir()
@@ -32,6 +42,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: pokreni cleanup loop za audit_jobs na startup, zaustavi na shutdown.
+# Koristimo lifespan context manager umesto deprecated @app.on_event("startup").
+# ---------------------------------------------------------------------------
+from contextlib import asynccontextmanager  # noqa: E402
+
+@asynccontextmanager
+async def lifespan(app):
+    start_cleanup_loop()
+    yield
+    # Na shutdown — cleanup thread je daemon, tako da će se završiti automatski
+    # kad se proces zatvori. Eksplicitno ga ne gasimo da ne blokiramo shutdown.
+
+app.router.lifespan_context = lifespan
 
 
 class ScrapeReq(BaseModel):
@@ -191,20 +217,72 @@ async def root():
 
 @app.post("/audit/{lead_id}")
 async def audit_site(lead_id: int, bg: BackgroundTasks):
-    """Re-fetch and audit the lead's website synchronously (or in background if you really must).
+    """Pokreni audit u pozadini, vrati ``{job_id, status, lead_id}``.
 
-    Returns 503 if no successful scrape exists yet — client should call
-    /scrape first.
+    Audit traje 30–90s (re-fetch + 5 faza + MiniMax vision). Pokretanje u
+    pozadini omogućava GUI da polling-uje ``GET /audit/status/{job_id}`` i
+    prikazuje **stvaran napredak po fazama** (Re-fetch → SEO/Sec/Tech →
+    Performance/Content → Mobile/A11y → UI/Design) umesto fiksnog cikliranja.
+
+    Returns 404 ako nema uspešnog scrape-a (klijent treba prvo da pozove
+    ``POST /scrape``).
     """
+    lead = db.get_lead(lead_id)
+    if not lead:
+        return {"error": "lead not found"}, 404
+    if not lead.get("website_normalized"):
+        return {"error": "lead nema website — ne može se audittirati"}, 400
+
+    scrape = db.get_latest_successful_scrape(lead_id)
+    if not scrape:
+        return {"error": "no successful scrape found for this lead; run /scrape first"}, 404
+
+    job_id = str(uuid.uuid4())
+    create_audit_job(job_id, lead_id)
+    bg.add_task(_run_audit_job, job_id, lead_id)
+    return {"job_id": job_id, "lead_id": lead_id, "status": "running"}
+
+
+def _run_audit_job(job_id: str, lead_id: int) -> None:
+    """Background audit sa progress callback-om."""
+    def progress_cb(payload: dict) -> None:
+        update_audit_job(
+            job_id,
+            current_phase=payload.get("phase", ""),
+            phase_index=payload.get("phase_index", 0),
+            phase_message=payload.get("message", ""),
+        )
+
     try:
-        report = audit_runner.run_audit(lead_id)
+        report = audit_runner.run_audit(lead_id, progress_callback=progress_cb)
+        update_audit_job(
+            job_id,
+            status="done",
+            overall_rank=report.get("overall_rank"),
+            audit_id=report.get("audit_id"),
+            finished_at=time.time(),
+        )
+        print(f"[audit] job {job_id} done: overall={report.get('overall_rank')}")
     except ValueError as e:
-        return {"error": str(e)}, 404
+        update_audit_job(job_id, status="error", error=str(e), finished_at=time.time())
+        print(f"[audit] job {job_id} validation error: {e}")
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {"error": f"audit failed: {e}"}, 500
-    return report
+        update_audit_job(job_id, status="error", error=str(e), finished_at=time.time())
+        print(f"[audit] job {job_id} failed: {e}")
+
+
+@app.get("/audit/status/{job_id}")
+async def audit_status(job_id: str):
+    """Vraća progress (phase, phase_index, message) za audit job.
+
+    GUI polling-uje ovaj endpoint svakih ~1.5s dok ``status != done/error``.
+    """
+    job = get_audit_job(job_id)
+    if not job:
+        return {"error": "audit job not found (server restarted?)"}, 404
+    return audit_job_to_dict(job)
 
 
 @app.get("/audit/{lead_id}/latest")

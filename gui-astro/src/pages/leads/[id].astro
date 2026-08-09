@@ -7,10 +7,10 @@ import CardTitle from "../../components/CardTitle.astro";
 import CardDescription from "../../components/CardDescription.astro";
 import EditableField from "../../components/EditableField.astro";
 import AuditPanel from "../../components/AuditPanel.astro";
+import { getLatestAuditForLead, getAuditMetrics, listAuditsForLead } from "../../lib/siteAudit";
 import { getDb, schema } from "../../lib/db";
 import { eq, desc } from "drizzle-orm";
 import { formatDate, timeAgo } from "../../lib/utils";
-import { getLatestAuditForLead, getAuditMetrics } from "../../lib/siteAudit";
 
 const id = Number(Astro.params.id);
 const db = getDb();
@@ -52,6 +52,9 @@ const lead = row.lead;
 // Site audit (multi-criteria 0-100 ranking produced by scraper/audit/)
 const auditReport = getLatestAuditForLead(id);
 const auditMetrics = auditReport ? getAuditMetrics(auditReport.id) : [];
+// Istorija audita (poslednjih 5) za history panel — pomaže korisniku da vidi
+// trend i diff između audita umesto da bude "slepa" tačka u vremenu.
+const auditHistory = listAuditsForLead(id, 5);
 
 // Google search URL
 const searchQ = [lead.name, lead.city].filter(Boolean).join(" ");
@@ -505,6 +508,7 @@ const activeTab: "overview" | "audit" = requestedTab === "audit" ? "audit" : "ov
           }}
           report={auditReport as any}
           metrics={auditMetrics as any}
+          history={auditHistory as any}
           hasScrape={scrapes.length > 0}
         />
       </div>

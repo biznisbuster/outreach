@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 import trafilatura
 
-from . import security, performance, content, accessibility, mobile, structured, onpage, tech_stack
+from . import security, performance, content, accessibility, mobile, structured, onpage, tech_stack, ui_design
 from .site_rank import authority_score
 
 
@@ -228,31 +228,67 @@ def _count_accessible(re_pattern, html: str, kind: str) -> tuple[int, int]:
 # Top-level aggregate — pulls all metrics together
 # ---------------------------------------------------------------------------
 
-def aggregate(enriched_pages: list[dict], base_url: str, traffic_signals: dict) -> dict:
+def aggregate(
+    enriched_pages: list[dict],
+    base_url: str,
+    traffic_signals: dict,
+    screenshot_path: str | None = None,
+    progress_callback=None,
+) -> dict:
     """Run every audit module. Return a flat ``signals`` dict with:
         - per-category sub-score and raw values
         - per-page metrics for the report
         - tech-stack detection
         - traffic signals
+        - UI/Design score via MiniMax M3 vision (uses screenshot_path if set)
+
+    ``progress_callback`` (opciono) dobija ``{"phase_index": int, "phase": str,
+    "message": str}`` pre svakog većeg sub-audita (Security, Performance, Content,
+    Mobile+A11y, UI/Design). Ovo omogućava GUI da pokaže REAL phase iz backenda
+    umesto da ciklično rotira paušalne stringove.
     """
-    # Per-category sub-audits
+    def emit(idx: int, msg: str = "") -> None:
+        if progress_callback is None:
+            return
+        from ..audit_jobs import PHASES
+        progress_callback({
+            "phase": PHASES[idx],
+            "phase_index": idx,
+            "total_phases": len(PHASES),
+            "message": msg,
+        })
+
+    # Compute order je prilagođen korisničkim fazama (progress emit). Sub-auditi
+    # su uglavnom nezavisni, samo dva zavisna: tech_score (koristi perf.raw za
+    # http2_detected) i authority_score (koristi onp.raw + traffic_signals).
+
+    # Phase 1: SEO + Security + Tech (headers-driven, brzi)
+    emit(1, "Analyzing SEO, security headers, tech stack…")
     sec = security.audit_security(enriched_pages, base_url)
-    perf = performance.audit_performance(enriched_pages)
-    cont = content.audit_content(enriched_pages)
-    a11y = accessibility.audit_accessibility(enriched_pages)
-    mob = mobile.audit_mobile(enriched_pages)
     struct = structured.audit_structured(enriched_pages)
     onp = onpage.audit_onpage(enriched_pages)
 
-    # Tech stack detection
+    # Phase 2: Performance + Content (teži analizatori — page weight, Flesch…)
+    emit(2, "Analyzing performance, content depth, readability…")
+    perf = performance.audit_performance(enriched_pages)
+    cont = content.audit_content(enriched_pages)
+
+    # Tech stack detection + authority (zavisi od perf i onp iz prethodnih faza)
     homepage = _pick_homepage(enriched_pages, base_url)
     detected = tech_stack.detect_tech_stack(
         enriched_pages, homepage_headers=homepage.get("headers") if homepage else None
     )
     tech_score = tech_stack.tech_modernness_score(detected, http2=perf.raw.get("http2_detected", False))
-
-    # Authority (depends on onpage raw + traffic)
     auth_score, auth_issues = authority_score(traffic_signals, onp.raw)
+
+    # Phase 3: Mobile + Accessibility (viewport meta, alt text, ARIA, skip nav…)
+    emit(3, "Checking mobile + accessibility (viewport, alt text, ARIA landmarks, skip nav)…")
+    a11y = accessibility.audit_accessibility(enriched_pages)
+    mob = mobile.audit_mobile(enriched_pages)
+
+    # Phase 4: UI/Design (MiniMax M3 vision)
+    emit(4, "Sending homepage screenshot to MiniMax M3 for UI/Design rating…")
+    ui = ui_design.audit_ui_design(screenshot_path, base_url=base_url)
 
     # Per-page SEO score — mirror the old per-page logic so the report can show
     # a per-page number; we re-derive it cheaply here.
@@ -268,8 +304,15 @@ def aggregate(enriched_pages: list[dict], base_url: str, traffic_signals: dict) 
         "mobile_a11y": round((mob.score + a11y.score) / 2),
         "tech_modern": tech_score,
         "authority":   auth_score,
+        # Ako UI design skipped (nema API key / slika / score), koristi
+        # neutralnu vrednost (50) da ne povuče overall_rank nadole.
+        "ui_design":   ui.get("score") if ui.get("score") is not None else 50,
     }
     # Attach per-category issues — list[dict {name, issues: [str]}]
+    ui_issues = list(ui.get("issues", []))
+    if ui.get("skipped"):
+        # Pokaži korisniku ZAŠTO je preskočeno — ne skrivaj config problem.
+        ui_issues = ui_issues + ([ui.get("skip_reason", "")] if ui.get("skip_reason") else [])
     category_issue_lists = {
         "seo":         _seo_category_issues(enriched_pages, struct),
         "performance": perf.issues,
@@ -278,6 +321,7 @@ def aggregate(enriched_pages: list[dict], base_url: str, traffic_signals: dict) 
         "mobile_a11y": list(mob.issues) + list(a11y.issues),
         "tech_modern": [],
         "authority":   auth_issues,
+        "ui_design":   ui_issues,
     }
 
     # Per-page mini summary
@@ -304,6 +348,7 @@ def aggregate(enriched_pages: list[dict], base_url: str, traffic_signals: dict) 
             "mobile_a11y": {"mobile": mob.raw, "accessibility": a11y.raw},
             "tech_modern": detected,
             "authority":   {"traffic": traffic_signals, "onpage": onp.raw},
+            "ui_design":   ui,  # čitav modul output (score, issues, summary, skipped, raw)
         },
         "pages": pages_summary,
     }

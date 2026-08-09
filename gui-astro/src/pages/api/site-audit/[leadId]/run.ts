@@ -1,12 +1,15 @@
 /**
- * POST /api/site-audit/[leadId]/run — kick off a site audit.
+ * POST /api/site-audit/[leadId]/run — kick off a site audit (async).
  *
- * Proxies to the Python scraper service (POST /audit/{leadId}). The scraper
- * does the actual work, persists to site_audits + site_audit_metrics, and
- * returns the full report. We forward that as JSON.
+ * Proxies to the Python scraper service (POST /audit/{leadId}). Scraper
+ * returns immediately with `{job_id, status: "running"}` and runs the audit
+ * in a background thread. Real-time progress comes via polling:
+ *     GET /api/site-audit/status/[jobId]
  *
- * The request can take 30s – 90s for sites with 20+ pages; the scraper
- * runs synchronously and only returns when done.
+ * Why async? Audit lasts 30–90s (re-fetch HTML + 5 phase analyses + MiniMax
+ * vision call). With sync API the browser waited indefinitely; with async +
+ * polling, the GUI shows the REAL current phase from the backend instead of
+ * cycling fake messages.
  */
 import type { APIRoute } from "astro";
 import { ok, bad, notFound } from "../../../../lib/api";
@@ -32,15 +35,34 @@ export const POST: APIRoute = async ({ params }) => {
     const r = await fetch(`${scraperUrl}/audit/${leadId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(180_000), // 3 min — audits can be slow
+      // Scraper returns {job_id, status: "running"} odmah — ne čeka 90s.
+      signal: AbortSignal.timeout(15_000),
     });
     if (!r.ok) {
       const t = await r.text().catch(() => r.statusText);
+      // Poseban slučaj: scraper vrati {"error": "no successful scrape..."} sa 404
+      // — to je KORISNIČKI VALIDAN razlog (treba prvo scrape), prosleđuj dalje.
+      try {
+        const j = JSON.parse(t);
+        if (j && j.error) {
+          return new Response(JSON.stringify({ error: j.error }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      } catch {
+        // t wasn't JSON, fall through
+      }
       return bad(`Scraper greška: ${r.status} ${t}`);
     }
     const data = await r.json();
+    // Scraper returns {job_id, lead_id, status}
     return ok(data);
   } catch (e) {
-    return bad(`Scraper nedostupan: ${(e as Error).message}`);
+    const msg = (e as Error).message || String(e);
+    if (/abort|timeout/i.test(msg)) {
+      return bad("Scraper nije odgovorio na pokretanje audita (timeout).");
+    }
+    return bad(`Scraper nedostupan: ${msg}`);
   }
 };

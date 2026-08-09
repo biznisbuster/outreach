@@ -71,6 +71,39 @@ from maps_cold_calling.utils.captcha import detect as detect_captcha
 
 LOG = logging.getLogger(__name__)
 
+# Domeni društvenih mreža — nisu pravi sajt biznisa. Preskakanje screenshot-a
+# i email enrichment-a za njih štedi 6-17s po biznisu (goto + screenshot +
+# crawl kontakt stranice koje ionako nemaju email). Google Maps često vrati
+# instagram.com/facebook.com profil kao "website" lokalnog biznisa.
+_SOCIAL_DOMAINS = {
+    "instagram.com",
+    "facebook.com",
+    "m.facebook.com",
+    "fb.com",
+    "tiktok.com",
+    "youtube.com",
+    "youtu.be",
+    "twitter.com",
+    "x.com",
+    "vk.com",
+}
+
+
+def _is_social_website(raw: str | None) -> bool:
+    """Da li je 'website' zapravo profil na društvenoj mreži?"""
+    if not raw:
+        return False
+    s = raw.strip().lower()
+    s = s.replace("https://", "").replace("http://", "").replace("www.", "")
+    host = s.split("/")[0].split("?")[0].split("#")[0]
+    if host in _SOCIAL_DOMAINS:
+        return True
+    # m.facebook.com → facebook.com
+    parts = host.split(".")
+    if len(parts) > 2 and ".".join(parts[1:]) in _SOCIAL_DOMAINS:
+        return True
+    return False
+
 
 def _make_exporter(cfg: RunConfig) -> Exporter:
     if cfg.output_format == "json":
@@ -369,7 +402,9 @@ async def _run(cfg: RunConfig) -> int:
                                 # Sada ako imamo website (originalan ili Google fallback), uradi:
                                 # 1) Screenshot homepage-a
                                 # 2) Email + phone extraction (homepage + kontaktstranica)
-                                if biz.website:
+                                # PRESKÁČI za social domene (instagram/facebook) — nema
+                                # pravog sajta, screenshot/crawl samo gubi vreme.
+                                if biz.website and not _is_social_website(biz.website):
                                     slug = _safe_slug(f"{biz.name}-{i}")
 
                                     # SCREENSHOT
@@ -446,11 +481,13 @@ async def _run(cfg: RunConfig) -> int:
                                             data={"name": biz.name},
                                         ))
                                 else:
+                                    # Social domen (instagram/facebook/…) — preskačemo
+                                    # enrichment: nema pravog sajta za screenshot/email.
                                     emitter.emit(ProgressEvent(
                                         stage=STAGE_CONTACT,
                                         event=EVT_SKIP,
-                                        message=f"contact: {biz.name[:30]} - nema website",
-                                        data={"name": biz.name},
+                                        message=f"contact: {biz.name[:30]} - social-only website ({biz.website[:40] if biz.website else ''})",
+                                        data={"name": biz.name, "website": biz.website, "reason": "social"},
                                     ))
 
                             # Enrich with feed-card data when the detail page missed it.

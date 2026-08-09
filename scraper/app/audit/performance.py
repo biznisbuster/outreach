@@ -59,6 +59,11 @@ def audit_performance(raw_pages: list[dict]) -> PerfResult:
     lcp_ms = _percentile_from_pages(raw_pages, "largest_contentful_paint_ms", 75)
     load_ms = _percentile_from_pages(raw_pages, "load_ms", 75)
 
+    # Enhanced checks (2026-07): image lazy loading, async/defer skripte, cache headers
+    lazy_pct = _image_lazy_loading_pct(raw_pages)
+    async_defer_pct = _script_async_defer_pct(raw_pages)
+    cache_pct = _cache_control_pct(raw_pages)
+
     checks = {
         "ttfb_ok": med_ttfb <= 600,
         "ttfb_good": med_ttfb <= 300,
@@ -71,6 +76,10 @@ def audit_performance(raw_pages: list[dict]) -> PerfResult:
         "resource_hints_ok": hint_pct >= 50,
         "fcp_ok": fcp_ms is None or fcp_ms <= 2500,
         "lcp_ok": lcp_ms is None or lcp_ms <= 4000,
+        # Enhanced — nova tri signala
+        "lazy_loading_ok": lazy_pct >= 60,
+        "scripts_async_defer_ok": async_defer_pct >= 80,
+        "cache_control_ok": cache_pct >= 50,
     }
 
     score = _score_checks(checks)
@@ -87,6 +96,10 @@ def audit_performance(raw_pages: list[dict]) -> PerfResult:
         "fcp_ms_p75": fcp_ms,
         "lcp_ms_p75": lcp_ms,
         "load_ms_p75": load_ms,
+        # Enhanced
+        "image_lazy_loading_pct": lazy_pct,
+        "scripts_async_defer_pct": async_defer_pct,
+        "cache_control_pct": cache_pct,
     }
     issues = _issues_for(checks, raw)
     return PerfResult(raw=raw, score=score, issues=issues)
@@ -101,6 +114,12 @@ _HEAD_RE = re.compile(r"<head[^>]*>(.*?)</head>", re.DOTALL | re.IGNORECASE)
 _SCRIPT_RE = re.compile(r"<script\b([^>]*)>", re.IGNORECASE)
 _STYLE_RE = re.compile(r"<style\b([^>]*)>(.*?)</style>", re.DOTALL | re.IGNORECASE)
 _LINK_STYLE_RE = re.compile(r"<link\b[^>]*rel=[\"']?stylesheet[\"']?[^>]*>", re.IGNORECASE)
+# Image lazy-loading: <img loading="lazy"> (native) ili lazysizes/lozad class hint
+_IMG_LAZY_RE = re.compile(r"<img\b[^>]*\bloading=[\"\']?(?:lazy|auto)[\"\']?", re.IGNORECASE)
+# CSS background-image lazy-loading (loading="lazy" na <img> samo; pozadinske slike nemaju native lazy)
+_IMG_TOTAL_RE = re.compile(r"<img\b", re.IGNORECASE)
+# Async/defer na <script src=...> — koliko skripti ima async/defer
+_SCRIPT_SRC_RE = re.compile(r"<script\b[^>]*\bsrc=[\"'][^\"']+[\"'][^>]*>", re.IGNORECASE)
 
 
 def _count_render_blocking(html: str) -> int:
@@ -143,6 +162,69 @@ def _has_resource_hints(html: str) -> bool:
     low = html.lower()
     return any(f'rel="{r}"' in low or f"rel='{r}'" in low for r in
                ("preload", "prefetch", "preconnect", "dns-prefetch"))
+
+
+def _image_lazy_loading_pct(raw_pages: list[dict]) -> int:
+    """% <img> tagova koji imaju loading="lazy" ili loading="auto".
+
+    Browser-i po defaultu eager-loaduju sve slike (čak i ispod folda). Native
+    loading="lazy" odlaže fetch dok slika ne uđe u viewport — smanjuje
+    initial page weight i poboljšava LCP/TTI za 20-50% na stranicama sa
+    puno slika (blog, portfolio, e-commerce).
+    """
+    total = 0
+    lazy = 0
+    for p in raw_pages:
+        html = p.get("html") or ""
+        if not html:
+            continue
+        page_total = len(_IMG_TOTAL_RE.findall(html))
+        if page_total == 0:
+            continue
+        page_lazy = len(_IMG_LAZY_RE.findall(html))
+        total += page_total
+        lazy += page_lazy
+    if total == 0:
+        return 100  # nema slika → nema problema
+    return round(lazy / total * 100)
+
+
+def _script_async_defer_pct(raw_pages: list[dict]) -> int:
+    """% eksternih <script src=...> koji imaju async/defer/type=module."""
+    total = 0
+    non_blocking = 0
+    for p in raw_pages:
+        html = p.get("html") or ""
+        if not html:
+            continue
+        for m in _SCRIPT_SRC_RE.finditer(html):
+            total += 1
+            tag = m.group(0).lower()
+            if "async" in tag or "defer" in tag or 'type="module"' in tag or "type='module'" in tag:
+                non_blocking += 1
+    if total == 0:
+        return 100
+    return round(non_blocking / total * 100)
+
+
+def _cache_control_pct(raw_pages: list[dict]) -> int:
+    """% HTML strana sa Cache-Control ili ETag header-om.
+
+    Ako nema cache direktive, browser svaki put re-downloaduje čitav HTML.
+    Za statičke sajtove ovo je ogroman bandwidth/TTFB waste.
+    """
+    if not raw_pages:
+        return 0
+    n_ok = 0
+    for p in raw_pages:
+        h = {k.lower(): v for k, v in (p.get("headers") or {}).items()}
+        cc = h.get("cache-control", "")
+        etag = h.get("etag", "")
+        expires = h.get("expires", "")
+        # Accept any non-empty cache directive (max-age, no-cache, private...)
+        if cc or etag or expires:
+            n_ok += 1
+    return round(n_ok / len(raw_pages) * 100)
 
 
 def _compression_coverage(raw_pages: list[dict]) -> int:
@@ -203,35 +285,38 @@ def _percentile(xs: list[float], p: int) -> float:
 
 def _score_checks(checks: dict) -> int:
     score = 0
-    # TTFB (up to 25)
+    # TTFB (up to 20)
     if checks["ttfb_good"]:
-        score += 25
+        score += 20
     elif checks["ttfb_ok"]:
-        score += 15
-    # Weight (up to 25)
+        score += 12
+    # Weight (up to 20)
     if checks["weight_good"]:
-        score += 25
+        score += 20
     elif checks["weight_ok"]:
-        score += 14
-    # Render-blocking (up to 15)
+        score += 11
+    # Render-blocking (up to 12)
     if checks["render_blocking_good"]:
-        score += 15
+        score += 12
     elif checks["render_blocking_low"]:
+        score += 7
+    # Compression (12)
+    if checks.get("compression_ok"):
+        score += 12
+    # HTTP/2 (8)
+    if checks.get("http2"):
         score += 8
-    # Compression (10)
-    if checks["compression_ok"]:
-        score += 10
-    # HTTP/2 (10)
-    if checks["http2"]:
-        score += 10
     # Resource hints (5)
-    if checks["resource_hints_ok"]:
+    if checks.get("resource_hints_ok"):
         score += 5
-    # FCP (5)
-    if checks["fcp_ok"]:
+    # Enhanced: image lazy loading (5)
+    if checks.get("lazy_loading_ok"):
         score += 5
-    # LCP (5) — considered only if FCP passed too (dependency)
-    if checks["lcp_ok"] and checks["fcp_ok"]:
+    # Enhanced: async/defer skripte (5)
+    if checks.get("scripts_async_defer_ok"):
+        score += 5
+    # Enhanced: cache-control / etag (5)
+    if checks.get("cache_control_ok"):
         score += 5
     return min(100, score)
 
@@ -262,4 +347,19 @@ def _issues_for(checks: dict, raw: dict) -> list[str]:
         out.append(f"First Contentful Paint p75 = {raw['fcp_ms_p75']} ms — over 2.5 s target.")
     if raw.get("lcp_ms_p75") and not checks["lcp_ok"] and checks["fcp_ok"]:
         out.append(f"Largest Contentful Paint p75 = {raw['lcp_ms_p75']} ms — over 4 s target.")
+    # Enhanced — image lazy loading
+    if not checks.get("lazy_loading_ok") and raw.get("image_lazy_loading_pct", 100) < 60:
+        out.append(
+            f"Only {raw['image_lazy_loading_pct']}% of <img> tags use loading=\"lazy\" — browser-i eager-loaduju sve slike po defaultu. Dodaj loading=\"lazy\" na slike ispod folda (npr. blog post listinge)."
+        )
+    # Enhanced — async/defer
+    if not checks.get("scripts_async_defer_ok") and raw.get("scripts_async_defer_pct", 100) < 80:
+        out.append(
+            f"Only {raw['scripts_async_defer_pct']}% of external <script src=...> use async/defer — ostali blokiraju parsiranje HTML-a. Dodaj defer (ili async) na eksterne skripte."
+        )
+    # Enhanced — cache headers
+    if not checks.get("cache_control_ok"):
+        out.append(
+            f"Only {raw.get('cache_control_pct', 0)}% of HTML responses have Cache-Control / ETag / Expires header — browser svaki put re-downloaduje HTML. Dodaj Cache-Control: max-age=... za statičke resurse."
+        )
     return out

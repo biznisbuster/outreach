@@ -7,13 +7,15 @@ Steps:
     2. Collect URLs from ``site_pages`` (capped at MAX_AUDIT_PAGES, default 25).
     3. Re-fetch HTML + headers for each URL.
     4. Enrich with structured text, headings, accessibility counters.
-    5. Run all sub-audits.
-    6. Combine via site_rank → overall_rank + verdict + categories.
-    7. Persist to ``site_audits`` + ``site_audit_metrics`` tables.
-    8. Return the full report dict.
+    5. Locate homepage screenshot (if any) for the UI/Design category.
+    6. Run all sub-audits (security, performance, content, a11y, mobile, ui).
+    7. Combine via site_rank → overall_rank + verdict + categories.
+    8. Persist to ``site_audits`` + ``site_audit_metrics`` tables.
+    9. Return the full report dict.
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import time
@@ -22,6 +24,7 @@ from urllib.parse import urlparse
 
 from . import aggregate as ag
 from . import traffic as traffic_module
+from ..audit_jobs import PHASES
 from .site_rank import compute_overall, WEIGHTS
 
 
@@ -29,18 +32,82 @@ MAX_AUDIT_PAGES = int(os.environ.get("MAX_AUDIT_PAGES", "25"))
 AUDIT_DELAY_SEC = float(os.environ.get("AUDIT_DELAY_SEC", "0.4"))
 
 
+def _make_progress_emitter(progress_callback):
+    """Napravi ``emit(phase_idx, message)`` koja sigurno radi i sa/bez callback-a.
+
+    Ako ``progress_callback`` nije prosleđen (legacy poziv), ovo je no-op —
+    runner radi kao i ranije. Kada je callback prosleđen (poziv iz main.py
+    async audit rute), svaki poziv ažurira ``AuditJob.current_phase`` itd.
+    """
+    def emit(phase_idx: int, message: str = "") -> None:
+        if progress_callback is None:
+            return
+        idx = max(0, min(len(PHASES) - 1, phase_idx))
+        progress_callback({
+            "phase": PHASES[idx],
+            "phase_index": idx,
+            "total_phases": len(PHASES),
+            "message": message,
+        })
+    return emit
+
+
+def _find_homepage_screenshot(lead_id: int, scrape_id: int) -> str | None:
+    """Locate the homepage PNG for this lead.
+
+    Order:
+        1) ``data/screenshots/{lead_id}_*.png`` (od site scrape-a)
+        2) ``data/scrape-runs/{job_id}/screenshots/*.png`` (stariji scraper-leads)
+    Vraća najnoviji fajl po mtime, ili ``None`` ako ne postoji.
+    """
+    candidates: list[str] = []
+
+    # 1. screenshots/ root
+    candidates.extend(glob.glob(f"data/screenshots/{lead_id}_*.png"))
+    candidates.extend(glob.glob(f"../data/screenshots/{lead_id}_*.png"))
+
+    # 2. scrape-runs (relativno od CWD-a)
+    for pattern in (
+        f"data/scraper-runs/*/screenshots/*.png",
+        f"../data/scraper-runs/*/screenshots/*.png",
+    ):
+        candidates.extend(glob.glob(pattern))
+
+    if not candidates:
+        return None
+
+    # Filtriraj one koji pripadaju baš ovom lead_id-u (za safety)
+    valid = [c for c in candidates if os.path.basename(c).startswith(f"{lead_id}_")]
+    if not valid:
+        valid = candidates  # fallback na sve
+
+    try:
+        valid.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    except OSError:
+        pass
+    return valid[0] if valid else None
+
+
 # ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
 
-def run_audit(lead_id: int, *, audit_id: int | None = None) -> dict:
+def run_audit(lead_id: int, *, audit_id: int | None = None, progress_callback=None) -> dict:
     """Run a fresh audit on the lead's most recent successful scrape.
 
-    ``audit_id`` is normally auto-generated; pass an integer to use a specific
-    row id (only useful when writing test fixtures).
+    Args:
+        lead_id: lead whose website to audit.
+        audit_id: optional — pass an int to use a specific row id (test fixtures).
+        progress_callback: optional callable ``fn(payload: dict)`` invoked at
+            each major phase so the GUI / status endpoint can stream real
+            progress (instead of guessing). Payload: ``{"phase": str,
+            "phase_index": int, "total_phases": int, "message": str}``.
+
     Returns the full report dict (same shape persisted to DB).
     """
     from .. import db  # late import to avoid cycles
+
+    emit = _make_progress_emitter(progress_callback)
 
     lead = db.get_lead(lead_id)
     if not lead or not lead.get("website_normalized"):
@@ -48,6 +115,7 @@ def run_audit(lead_id: int, *, audit_id: int | None = None) -> dict:
     domain = lead["website_normalized"]
     base_url = f"https://{domain}"
 
+    emit(0, f"Picking up latest scrape for {domain}…")
     scrape = db.get_latest_successful_scrape(lead_id)
     if not scrape:
         raise ValueError(f"no successful scrape found for lead {lead_id}; run /scrape first")
@@ -59,19 +127,32 @@ def run_audit(lead_id: int, *, audit_id: int | None = None) -> dict:
 
     t0 = time.time()
 
-    # 1) Re-fetch each URL (gives us current HTML, headers, page weight)
+    # Phase 0: Re-fetch HTML (gives us current HTML, headers, page weight)
+    emit(0, f"Re-fetching {len(urls)} pages for fresh analysis…")
     raw_pages = ag.fetch_raw_pages(urls, delay_sec=AUDIT_DELAY_SEC)
 
-    # 2) Enrich with parsed structure
+    # Enrich with parsed structure (cheap, do it before phase 1 emit)
     enriched_pages = ag.enrich_pages_with_extra(raw_pages)
 
-    # 3) Traffic signals (Tranco + OpenPageRank)
+    # Phase 1 prep: traffic signals
+    emit(1, "Looking up authority signals (Tranco, OpenPageRank)…")
     traffic_signals = traffic_module.traffic_signals(domain)
 
-    # 4) Aggregate — runs all sub-audits
-    signals = ag.aggregate(enriched_pages, base_url, traffic_signals)
+    # Locate homepage screenshot for UI/Design (MiniMax vision)
+    screenshot_path = _find_homepage_screenshot(lead_id, scrape_id)
+    if screenshot_path:
+        print(f"[audit] homepage screenshot: {screenshot_path}")
+    else:
+        print(f"[audit] nema homepage screenshot-a za lead {lead_id} — UI/Design bi\u0107e biti skipped")
 
-    # 5) Compute overall rank via the weighted-sum scorer
+    # Phases 1-6: delegate to aggregate, which emits progress per sub-audit
+    signals = ag.aggregate(
+        enriched_pages, base_url, traffic_signals,
+        screenshot_path=screenshot_path,
+        progress_callback=progress_callback,
+    )
+
+    # 6) Compute overall rank via the weighted-sum scorer
     cat_scores = signals["category_scores"]
     overall_rank, ranked, verdict = compute_overall(cat_scores)
 
@@ -107,7 +188,7 @@ def run_audit(lead_id: int, *, audit_id: int | None = None) -> dict:
         "created_at": int(time.time() * 1000),
     }
 
-    # 6) Persist
+    # 7) Persist
     audit_id = db.create_audit(report, audit_id=audit_id)
     db.create_audit_metrics(audit_id, ranked)
     report["audit_id"] = audit_id

@@ -101,8 +101,20 @@ class ProgressEmitter:
         self._file = file_path
         self._stdout = stdout
         self._last_count: int = 0
+        self._events: list[dict[str, Any]] = []
+        self._max_events: int = 200
+
+    def _append_event(self, event: ProgressEvent) -> None:
+        """Dodaj event u istoriju (cap da fajl ne raste beskonačno)."""
+        self._events.append(asdict(event))
+        if len(self._events) > self._max_events:
+            del self._events[: len(self._events) - self._max_events]
 
     def emit(self, event: ProgressEvent) -> None:
+        # Uvek dodaj u istoriju (koristi se za UI event log umesto replay-anja
+        # last_event-a svaki poll).
+        self._append_event(event)
+
         # 1. Callback
         if self._callback is not None:
             try:
@@ -120,15 +132,16 @@ class ProgressEmitter:
             except Exception as exc:  # noqa: BLE001
                 LOG.warning("progress: stdout write failed: %s", exc)
 
-        # 3. File. Write the latest snapshot, overwriting each time.
-        #    Use atomic-ish write (write to .tmp then rename) so a
-        #    concurrent reader never sees a half-written file.
+        # 3. File. Write the latest snapshot + event history, overwriting each time.
+        #    Use atomic-ish write (write to .tmp then rename) so a concurrent reader
+        #    never sees a half-written file.
         if self._file is not None:
             try:
                 payload = {
                     "last_event": asdict(event),
                     "last_count": event.count,
                     "last_update": event.timestamp,
+                    "events": self._events,
                 }
                 tmp = self._file.with_suffix(self._file.suffix + ".tmp")
                 tmp.write_text(

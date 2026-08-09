@@ -192,32 +192,48 @@ export const POST: APIRoute = async ({ request }) => {
     // U force modu, preskačemo i PhoneE164 unique check — i dalje ćemo pokušati insert
     // sa novim ključem. Ako postoji unique constraint i na phone_e164, ignorišemo grešku
     // (to se ne može desiti jer phone_e164 nema unique index u bazi).
-    const [ins] = db
-      .insert(schema.leads)
-      .values({
-        campaignId,
-        name: row.name.trim(),
-        category: row.category ?? null,
-        phoneRaw: row.phone_raw ?? null,
-        phoneE164,
-        email: row.email ?? null,
-        websiteRaw: row.website ?? null,
-        websiteNormalized,
-        address: row.address ?? null,
-        city: row.city ?? null,
-        googleRating: row.rating ?? null,
-        reviewsCount: row.reviews_count ?? null,
-        source: row.source ?? "maps",
-        sourceUrl: row.google_maps_url ?? null,
-        statusId: noviStatus?.id ?? null,
-        dedupKey: key,
-      })
-      .returning({ id: schema.leads.id })
-      .all();
+    try {
+      const [ins] = db
+        .insert(schema.leads)
+        .values({
+          campaignId,
+          name: row.name.trim(),
+          category: row.category ?? null,
+          phoneRaw: row.phone_raw ?? null,
+          phoneE164,
+          email: row.email ?? null,
+          websiteRaw: row.website ?? null,
+          websiteNormalized,
+          address: row.address ?? null,
+          city: row.city ?? null,
+          googleRating: row.rating ?? null,
+          reviewsCount: row.reviews_count ?? null,
+          source: row.source ?? "maps",
+          sourceUrl: row.google_maps_url ?? null,
+          statusId: noviStatus?.id ?? null,
+          dedupKey: key,
+        })
+        .returning({ id: schema.leads.id })
+        .all();
 
-    if (ins) {
-      created++;
-      createdIds.push(ins.id);
+      if (ins) {
+        created++;
+        createdIds.push(ins.id);
+      }
+    } catch (insErr) {
+      // Unique constraint (dedup_key) ili bilo koja druga greška za ovaj red —
+      // NE ruši ceo batch. Brojimo kao duplikat i nastavljamo dalje da ostali
+      // leadovi ne ostanu neuvezeni zbog jednog problematičnog reda.
+      duplicates++;
+      duplicateDetails.push({
+        name: row.name,
+        reason: "web",
+        matchValue: key,
+        existingId: 0,
+        existingCampaignId: campaignId,
+        existingCampaignName: null,
+        existingCity: row.city ?? null,
+      });
     }
   }
 

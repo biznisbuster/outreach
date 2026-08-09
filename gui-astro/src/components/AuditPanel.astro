@@ -46,14 +46,24 @@ interface ReportRow {
   createdAtIso?: string | null;
 }
 
+interface HistoryRow {
+  id: number;
+  overallRank: number;
+  verdict: string;
+  verdictLabel?: string | null;
+  createdAt: number | Date | null;
+}
+
 interface Props {
   lead: { id: number; name: string; websiteNormalized?: string | null };
   report: ReportRow | null;
   metrics: MetricRow[];
+  /** Poslednjih 5 audita za ovaj lead (newest first) — history panel. */
+  history?: HistoryRow[];
   /** Has this lead ever been scraped? Controls empty-state. */
   hasScrape: boolean;
 }
-const { lead, report, metrics, hasScrape } = Astro.props as Props;
+const { lead, report, metrics, history, hasScrape } = Astro.props as Props;
 
 const verdictMeta: Record<string, { emoji: string; cls: string; bg: string; border: string }> = {
   critical:  { emoji: "🔴", cls: "text-red-700 dark:text-red-300",    bg: "bg-red-50 dark:bg-red-950/30",     border: "border-red-300/60" },
@@ -86,6 +96,7 @@ const CAT_LABELS: Record<string, string> = {
   mobile_a11y: "Mobile / A11y",
   tech_modern: "Tech / Modern",
   authority: "Authority",
+  ui_design: "UI / Dizajn",
 };
 
 function buildCatRows(): CatRow[] {
@@ -209,6 +220,21 @@ function formatRaw(key: string, raw: any): { title: string; value: string }[] {
       if (Array.isArray(o.addresses) && o.addresses.length) notes.push(`Address: ${o.addresses.length} found`);
       return notes.map((v, i) => ({ title: i === 0 ? "Signals" : "", value: v }));
     }
+    case "ui_design": {
+      // raw je ceo output iz ui_design.audit_ui_design() — sadrži i summary,
+      // issues, skipped flag, skip_reason. Ako je AI evaluacija uspela,
+      // prikaži summary na vrhu + issues; ako skipped, objasni zašto.
+      const notes: { title: string; value: string }[] = [];
+      if (raw.skipped) {
+        notes.push({ title: "Status", value: "⏭ Preskočeno" });
+        if (raw.skip_reason) notes.push({ title: "Razlog", value: raw.skip_reason });
+      } else {
+        notes.push({ title: "AI model", value: raw.raw?._model ?? "MiniMax-M3" });
+        if (raw.summary) notes.push({ title: "Ocena UI-ja", value: raw.summary });
+        notes.push({ title: "Issues", value: `${(raw.issues ?? []).length} detektovano` });
+      }
+      return notes;
+    }
     default:
       return [];
   }
@@ -234,6 +260,23 @@ const catRows = buildCatRows();
 const overall = overallLabel(report);
 const overallMeta = overall?.meta ?? null;
 const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
+// Extend report sa history (koristi se u history panelu ispod).
+const historyWithCurrent = (() => {
+  const h = (history || []).slice();
+  if (report && !h.some((x) => x.id === report.id)) {
+    h.unshift({
+      id: report.id,
+      overallRank: report.overallRank,
+      verdict: report.verdict,
+      verdictLabel: report.verdictLabel,
+      createdAt: report.createdAt,
+    });
+  }
+  return h.slice(0, 5);
+})();
+// "renderReport" je isti kao `report` ali sa history dodatim — template
+// koristi renderReport umesto report da bi imao pristup history.
+const renderReport = report ? { ...(report as any), history: historyWithCurrent } : report;
 ---
 
 <div id="audit-panel" data-lead-id={lead.id} class="space-y-6">
@@ -246,8 +289,36 @@ const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
           <p class="mt-1 text-sm text-muted-foreground">
             {hasScrape
               ? "No audit yet for this lead. Run one to get a multi-criteria 0–100 score, per-page issues, and a pitch verdict."
-              : "This lead hasn't been scraped yet. Run a site scrape first, then come back to audit."}
+              : "Ovaj lead još nema site scrape — audit ne može da se pokrene bez njega."}
           </p>
+          {!hasScrape && (
+            <div class="mt-3 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
+              <div class="font-medium">Potreban korak:</div>
+              <ol class="mt-1.5 ml-4 list-decimal space-y-0.5 text-muted-foreground">
+                <li>Klikni <span class="font-medium">„Scrape site“</span> dole (30–180s)</li>
+                <li>Kad završi, dugme „Run audit now“ postaje aktivno</li>
+              </ol>
+              <button
+                type="button"
+                data-start-scrape
+                data-lead-id={lead.id}
+                class="mt-3 inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-50"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+                Scrape site (30–180s)
+              </button>
+              <div data-scrape-progress class="mt-2 hidden">
+                <div class="flex items-center gap-2 text-[11px]">
+                  <span data-scrape-stage class="font-medium">Pokrećem…</span>
+                  <span data-scrape-count class="tabular-nums text-muted-foreground">0 / 0</span>
+                </div>
+                <div class="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                  <div data-scrape-bar class="h-full bg-primary transition-all" style="width:0%"></div>
+                </div>
+                <div data-scrape-msg class="mt-1 text-[11px] text-muted-foreground"></div>
+              </div>
+            </div>
+          )}
           <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
             <li>SEO, performance, content depth, accessibility</li>
             <li>Security headers (HSTS, CSP, X-Frame-Options, …)</li>
@@ -298,27 +369,42 @@ const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
 
       {/* Action buttons */}
       <div class="ml-auto flex shrink-0 items-center gap-2">
-        <button type="button" data-audit-run
-          class="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:opacity-50">
-          {report ? "↻ Re-audit" : "Run audit now"}
+        <button
+          type="button"
+          data-audit-run
+          disabled={!hasScrape && !report}
+          title={!hasScrape && !report ? "Potrebno je prvo pokrenuti site scrape (Overview tab)" : ""}
+          class="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:brightness-110 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {!hasScrape && !report ? "Potreban site scrape prethodno" : (report ? "↻ Re-audit" : "Run audit now")}
         </button>
       </div>
     </div>
 
-    {/* Live progress */}
+    {/* Live progress — real-time phase iz polling-a (backend javlja koja faza) */}
     <div data-audit-progress hidden
       class="border-t border-border bg-muted/30 px-6 py-3 text-xs">
-      <div class="mb-1 flex items-center justify-between">
-        <span data-audit-progress-stage class="font-medium">Pokrećem…</span>
-        <span class="text-muted-foreground">audit može trajati 30–90 sekundi</span>
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" data-audit-spinner class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent"></span>
+          <span data-audit-progress-stage class="font-medium">Audit pokrenut, čekam prvi phase…</span>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          <span data-audit-progress-elapsed class="tabular-nums text-muted-foreground"></span>
+          <button
+            type="button"
+            data-audit-cancel
+            class="rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            title="Prekini polling (audit će se nastaviti u pozadini do kraja ili isteka)"
+          >
+            ✕ Prekini
+          </button>
+        </div>
       </div>
       <div class="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div data-audit-progress-bar class="h-full rounded-full bg-primary transition-all"
-          style="width: 100%; animation: pulse 1.5s ease-in-out infinite"></div>
+        <div data-audit-progress-bar class="h-full rounded-full bg-primary transition-all duration-500"
+          style="width: 0%"></div>
       </div>
-      <style>
-        @keyframes pulse { 0%,100% { opacity: 0.4 } 50% { opacity: 1 } }
-      </style>
     </div>
   </div>
 
@@ -341,14 +427,9 @@ const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
   {/* CATEGORY BREAKDOWN */}
   {report && catRows.length > 0 && (
     <section class="rounded-xl border border-border bg-card p-5 shadow-xs">
-      <div class="mb-4 flex items-center justify-between">
-        <div>
-          <h3 class="text-sm font-semibold">Kategorije</h3>
-          <p class="text-xs text-muted-foreground">Težinski skor (score × weight) sabran u overall_rank.</p>
-        </div>
-        <div class="text-[10px] tabular-nums text-muted-foreground">
-          Σ weighted = {formatNumber(report.overallRank)} / 100
-        </div>
+      <div class="mb-4">
+        <h3 class="text-sm font-semibold">Kategorije</h3>
+        <p class="text-xs text-muted-foreground">Ocene po kategorijama — kombinovane u overall rank.</p>
       </div>
       <ul class="space-y-3">
         {catRows.map((c) => (
@@ -356,9 +437,7 @@ const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
             <div class="mb-1 flex items-center justify-between text-sm">
               <span class="font-medium text-foreground/90">{c.label}</span>
               <span class="tabular-nums text-xs text-muted-foreground">
-                <span class="font-semibold text-foreground">{c.score}</span>/100 ·
-                weight {Math.round(c.weight * 100)}% ·
-                weighted <span class="font-semibold text-foreground">{c.weighted.toFixed(1)}</span>
+                <span class="font-semibold text-foreground">{c.score}</span>/100
               </span>
             </div>
             <div class="h-2.5 overflow-hidden rounded-full bg-muted/50">
@@ -481,95 +560,470 @@ const pct = overall ? Math.min(100, Math.max(0, overall.rank)) : 0;
       <p>Audit #{report.id} · scrape #{report.scrapeId ?? "?"} · duration {durationLabel(report.durationMs ?? 0)}</p>
     </footer>
   )}
+
+  {/* AUDIT HISTORY — poslednjih 5 audita sa rank delta (diff) */}
+  {(renderReport?.history?.length ?? 0) > 1 && (
+    <section class="rounded-xl border border-border bg-card p-5 shadow-xs">
+      <h3 class="text-sm font-semibold">Istorija audita (poslednjih {(renderReport!.history as any[]).length})</h3>
+      <p class="mb-3 mt-0.5 text-xs text-muted-foreground">Raniji auditovi za ovaj lead — klikni da vidiš potpun izveštaj. Strelice prikazuju rank promenu u odnosu na prethodni.</p>
+      <ol class="space-y-1">
+        {((renderReport!.history as any[]) || []).map((h: any, i: number) => {
+          const prev = (renderReport!.history as any[])[i + 1];
+          const delta = prev ? (h.overallRank - prev.overallRank) : 0; // -delta = improvement
+          return (
+            <li>
+              <a href={`/leads/${lead.id}?tab=audit&audit=${h.id}`}
+                 class="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent/40">
+                <div class="flex min-w-0 items-center gap-3">
+                  <span aria-hidden="true" class={`inline-block h-2 w-2 rounded-full ${scoreColor(h.overallRank)}`}></span>
+                  <span class="tabular-nums font-semibold">{h.overallRank}</span>
+                  <span class="text-muted-foreground">·</span>
+                  <span class="text-muted-foreground">/100</span>
+                  <span class="ml-2 truncate text-foreground/90">{h.verdictLabel ?? h.verdict}</span>
+                </div>
+                <div class="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
+                  {prev && (
+                    <span class={delta < 0 ? "text-emerald-700" : delta > 0 ? "text-red-700" : ""}>
+                      {delta < 0 ? `▼ ${Math.abs(delta)}` : delta > 0 ? `▲ ${delta}` : "—"}
+                    </span>
+                  )}
+                  <span>{new Date(h.createdAt as any).toLocaleString("sr-RS", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  )}
 </div>
 
 <script is:inline define:vars={{ leadId: lead.id, hasReport: !!report }}>
   (function () {
     const root = document.getElementById("audit-panel");
     if (!root) return;
-    const progress = root.querySelector("[data-audit-progress]");
-    const stage = root.querySelector("[data-audit-progress-stage]");
-    let progressTick = null;
 
-    function getRunBtn() { return root.querySelector("[data-audit-run]"); }
+    // --- State ---
+    let auditPollHandle = null;
+    let scrapePollHandle = null;
+    let activeJobId = null;        // jobId koji se trenutno polling-uje
+    let cancelled = false;          // korisnik kliknuo "Prekini" — samo zaustavljamo polling
+    let consecutiveNetErrors = 0;   // za exponential backoff
+    let lastPhaseIndex = -1;
+    let pollPaused = false;         // tab visibility API
 
-    function showProgress(yes) {
-      if (!progress) return;
-      progress.hidden = !yes;
-      if (yes) {
-        const stages = ["Pokrećem…", "Čekam scraper…", "Audit radi…"];
-        let i = 0;
-        if (progressTick) clearInterval(progressTick);
-        progressTick = setInterval(() => {
-          if (progress && !progress.hidden) {
-            stage.textContent = stages[i++ % stages.length];
-          } else if (progressTick) {
-            clearInterval(progressTick);
-            progressTick = null;
-          }
-        }, 1500);
-      } else if (progressTick) {
-        clearInterval(progressTick);
-        progressTick = null;
+    // --- DOM helpers ---
+    const $ = (sel) => root.querySelector(sel);
+    const $$ = (sel) => Array.from(root.querySelectorAll(sel));
+
+    // --- Tab visibility — pause polling kad tab nije aktivan (štedi resurse) ---
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) {
+        pollPaused = true;
+      } else {
+        pollPaused = false;
+        // Kad se vrati, odmah fetch jednom da osveži
+        if (activeJobId && auditPollHandle) fetchAuditStatus(activeJobId, true);
+      }
+    });
+
+    // --- Error banner: retry button + akcija hint + filtriranje "OK" ---
+    function normalizeUserMsg(raw) {
+      var m = String(raw == null ? "" : raw).trim();
+      // Filtriranje besmislenih fallback-ova
+      if (!m) return "Audit servis nije vratio opis greške. Proveri scraper log.";
+      if (/^(OK|ok|undefined|null|NaN)$/i.test(m)) return "Audit servis je vratio generičku grešku bez detalja. Proveri da li je scraper (port 8001) pokrenut i pokušaj ponovo.";
+      // Ako liči na {"detail": "..."} iz FastAPI-ja, izvuci detail
+      var dm = m.match(/"detail"\s*:\s*"([^"]+)"/);
+      if (dm) m = dm[1];
+      return m;
+    }
+
+    function classifyError(msg) {
+      // Vrati jednu od: "no_website" | "no_scrape" | "scraper_down" | "not_found" | "scraper_error" | "network" | "unknown"
+      if (/nema website/i.test(msg)) return "no_website";
+      if (/no successful scrape|site scrape|run \/scrape/i.test(msg)) return "no_scrape";
+      if (/Scraper nedostupan|fetch failed|ECONNREFUSED|8001/i.test(msg)) return "scraper_down";
+      if (/Lead ne postoji|404/i.test(msg)) return "not_found";
+      if (/400|500|502|503|scraper greška|400 OK/i.test(msg)) return "scraper_error";
+      if (/AbortError|timeout|network|mrež/i.test(msg)) return "network";
+      return "unknown";
+    }
+
+    function errorHint(kind) {
+      switch (kind) {
+        case "no_website":  return "Dodaj website URL na leadovom profilu, pa pokušaj ponovo.";
+        case "no_scrape":   return "Klikni „Scrape site“ iznad ovog dugmeta (30–180s), pa pokušaj ponovo.";
+        case "scraper_down":return "Scraper servis (port 8001) nije pokrenut. Pokreni ga iz scraper/ direktorijuma (DATABASE_PATH=../data/outreach.db uv run uvicorn app.main:app --port 8001).";
+        case "not_found":   return "Lead ili scrape ne postoji. Osveži stranicu.";
+        case "scraper_error":return "Scraper servis je prijavio grešku. Proveri scraper log (papučica) za stack trace.";
+        case "network":     return "Proveri internet konekciju i status gui-astro :3000.";
+        default:            return "Pokušaj ponovo. Ako se greška ponavlja, proveri scraper log.";
       }
     }
 
-    function setEnabled(yes) {
-      const btn = getRunBtn();
-      if (!btn) return;
-      btn.disabled = !yes;
-      btn.textContent = yes ? (hasReport ? "↻ Re-audit" : "Run audit now") : "⏳ Pokrećem…";
+    function showError(rawMsg, kind) {
+      clearError();
+      hideProgress();
+      var msg = normalizeUserMsg(rawMsg);
+      var k = kind || classifyError(msg);
+      var hint = errorHint(k);
+
+      var wrap = document.createElement("div");
+      wrap.setAttribute("data-audit-error", "");
+      wrap.setAttribute("role", "alert");
+      wrap.className = "mx-6 mb-4 mt-2 rounded-md border border-red-300/60 bg-red-50 px-4 py-3 text-sm text-red-900";
+      wrap.innerHTML =
+        '<div class="flex items-start gap-2.5">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="font-medium">Audit nije mogao da se pokrene</div>' +
+            '<div class="mt-1 text-xs text-red-800/90 break-words" data-audit-error-msg></div>' +
+            '<div class="mt-1.5 text-[11px] text-red-700/80 italic" data-audit-error-hint></div>' +
+          '</div>' +
+          '<div class="ml-2 flex shrink-0 items-center gap-1">' +
+            '<button type="button" data-audit-retry class="inline-flex h-7 items-center gap-1 rounded-md border border-red-300 bg-white px-2.5 text-xs font-medium text-red-800 transition-all hover:bg-red-100 active:scale-[0.97]">' +
+              '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>' +
+              'Pokušaj ponovo' +
+            '</button>' +
+            '<button type="button" data-audit-dismiss class="rounded-md px-1.5 text-xs text-red-700/70 hover:bg-red-100 hover:text-red-900" aria-label="Zatvori grešku">✕</button>' +
+          '</div>' +
+        '</div>';
+      var card = $(".overflow-hidden.rounded-xl");
+      if (card && card.parentNode) card.parentNode.insertBefore(wrap, card.nextSibling);
+      else root.prepend(wrap);
+      wrap.querySelector("[data-audit-error-msg]").textContent = msg;
+      wrap.querySelector("[data-audit-error-hint]").textContent = "💡 " + hint;
+      var retryBtn = wrap.querySelector("[data-audit-retry]");
+      var dismissBtn = wrap.querySelector("[data-audit-dismiss]");
+      if (retryBtn) retryBtn.addEventListener("click", function () { clearError(); runAudit(); });
+      if (dismissBtn) dismissBtn.addEventListener("click", clearError);
+      // Fokus na retry dugme (accessibility)
+      if (retryBtn) setTimeout(function () { retryBtn.focus(); }, 50);
     }
 
-    async function refreshPanel() {
+    function clearError() {
+      var old = $("[data-audit-error]");
+      if (old) old.remove();
+    }
+
+    // --- Progress ---
+    function showProgress() {
+      var progress = $("[data-audit-progress]");
+      if (!progress) return;
+      progress.hidden = false;
+      var stage = $("[data-audit-progress-stage]");
+      if (stage) stage.textContent = "Audit pokrenut, čekam prvi phase…";
+      var bar = $("[data-audit-progress-bar]");
+      if (bar) bar.style.width = "0%";
+      var elapsed = $("[data-audit-progress-elapsed]");
+      if (elapsed) elapsed.textContent = "0s";
+      var spinner = $("[data-audit-spinner]");
+      if (spinner) spinner.classList.remove("hidden");
+    }
+
+    function hideProgress() {
+      var progress = $("[data-audit-progress]");
+      if (!progress) return;
+      progress.hidden = true;
+      stopAuditPoll();
+    }
+
+    function updateProgress(d) {
+      var stage = $("[data-audit-progress-stage]");
+      var bar = $("[data-audit-progress-bar]");
+      var elapsed = $("[data-audit-progress-elapsed]");
+      var msg = "";
+      if (d.current_phase) msg = d.current_phase;
+      if (d.phase_message) msg += " — " + d.phase_message;
+      if (typeof d.phase_index === "number" && d.total_phases) {
+        msg = "(" + (d.phase_index + 1) + "/" + d.total_phases + ") " + msg;
+      }
+      if (stage && msg) stage.textContent = msg;
+      if (elapsed && typeof d.elapsed_sec === "number") {
+        elapsed.textContent = d.elapsed_sec + "s";
+      }
+      if (bar && typeof d.phase_index === "number" && d.total_phases) {
+        // Progress phase: 20% start (pokrenuto) → 100% na poslednjem phase-u
+        var pct = Math.round(((d.phase_index + 1) / d.total_phases) * 100);
+        bar.style.width = pct + "%";
+      }
+    }
+
+    function setRunBtnState(state, errored) {
+      var btn = $("[data-audit-run]");
+      if (!btn) return;
+      // state: "idle" | "running" | "error" | "cancelled"
+      switch (state) {
+        case "running":
+          btn.disabled = true;
+          btn.textContent = "⏳ " + (hasReport ? "Re-audit u toku…" : "Audit u toku…");
+          btn.classList.add("opacity-80");
+          break;
+        case "error":
+          btn.disabled = false;
+          btn.textContent = "↻ Pokušaj ponovo";
+          btn.classList.remove("opacity-80");
+          break;
+        case "cancelled":
+          btn.disabled = false;
+          btn.textContent = "↻ Nastavi audit";
+          btn.classList.remove("opacity-80");
+          break;
+        default:
+          btn.disabled = false;
+          btn.textContent = hasReport ? "↻ Re-audit" : "Run audit now";
+          btn.classList.remove("opacity-80");
+      }
+    }
+
+    // --- Polling ---
+    function startAuditPoll(jobId) {
+      stopAuditPoll();
+      activeJobId = jobId;
+      cancelled = false;
+      consecutiveNetErrors = 0;
+      lastPhaseIndex = -1;
+      // Odmah jedan fetch (bez čekanja 1.5s)
+      fetchAuditStatus(jobId, false);
+      auditPollHandle = setInterval(function () { fetchAuditStatus(jobId, false); }, 1500);
+      // Wire cancel dugme
+      var cancelBtn = $("[data-audit-cancel]");
+      if (cancelBtn && !cancelBtn.__wired) {
+        cancelBtn.__wired = true;
+        cancelBtn.addEventListener("click", function () {
+          cancelled = true;
+          stopAuditPoll();
+          hideProgress();
+          setRunBtnState("cancelled", false);
+        });
+      }
+    }
+
+    function stopAuditPoll() {
+      if (auditPollHandle) { clearInterval(auditPollHandle); auditPollHandle = null; }
+      activeJobId = null;
+    }
+
+    async function fetchAuditStatus(jobId, immediate) {
+      if (cancelled) return;
+      if (pollPaused && !immediate) return;
+      var progress = $("[data-audit-progress]");
       try {
-        const pageR = await fetch(location.pathname + "?tab=audit", { headers: { Accept: "text/html" } });
-        const html = await pageR.text();
-        const doc = new DOMParser().parseFromString(html, "text/html");
-        const fresh = doc.getElementById("audit-panel");
-        if (fresh) {
-          root.innerHTML = fresh.innerHTML;
-          wireRunButton();
+        var r = await fetch("/api/site-audit/status/" + encodeURIComponent(jobId), {
+          headers: { "Origin": location.origin },
+        });
+        var d = await r.json().catch(function () { return {}; });
+
+        if (!progress || progress.hidden) {
+          stopAuditPoll();
+          return;
+        }
+
+        // 404 = scraper restartovan, jobId izgubljen
+        if (r.status === 404 || /not found|restarted/i.test(d.error || "")) {
+          stopAuditPoll();
+          hideProgress();
+          setRunBtnState("error", true);
+          showError("Scraper servis je restartovan tokom audita — job je izgubljen iz memorije. Pokreni ponovo (audit će biti brži jer scrape ostaje u bazi).", "scraper_down");
+          return;
+        }
+
+        // Ostale HTTP greške — ne prekidaj polling (mreža može biti kratkotrajno nedostupna)
+        if (!r.ok) {
+          consecutiveNetErrors++;
+          // Ako ima 5+ uzastopnih mrežnih grešaka, prekini i pokaži retry
+          if (consecutiveNetErrors >= 5) {
+            stopAuditPoll();
+            hideProgress();
+            setRunBtnState("error", true);
+            showError("Mrežne greške pri polling-u audita (5+ uzastopno). Original: " + (d.error || r.statusText), "network");
+          }
+          return;
+        }
+
+        consecutiveNetErrors = 0;
+
+        // Progress UI update (samo ako se phase promenio da ne flicker-uje)
+        if (d.current_phase || d.phase_index != null) {
+          if (d.phase_index !== lastPhaseIndex) {
+            lastPhaseIndex = d.phase_index;
+            updateProgress(d);
+          }
+        }
+
+        if (d.status === "done") {
+          stopAuditPoll();
+          var stage = $("[data-audit-progress-stage]");
+          if (stage) stage.textContent = "✅ Gotovo (rank " + (d.overall_rank ?? "?") + ")";
+          var bar = $("[data-audit-progress-bar]");
+          if (bar) bar.style.width = "100%";
+          var spinner = $("[data-audit-spinner]");
+          if (spinner) spinner.classList.add("hidden");
+          // Kratka pauza da korisnik vidi "Gotovo" pa refresh
+          setTimeout(async function () {
+            await refreshPanel();
+            setRunBtnState("idle", false);
+            clearError();
+          }, 700);
+        } else if (d.status === "error") {
+          stopAuditPoll();
+          hideProgress();
+          setRunBtnState("error", true);
+          showError(d.error || "Audit servis je prijavio grešku tokom izvršavanja.", "scraper_error");
         }
       } catch (e) {
-        console.error(e);
-      } finally {
-        showProgress(false);
-        setEnabled(true);
+        // Tiha greška u jednom fetchu — nastavi polling, exponential backoff
+        consecutiveNetErrors++;
+      }
+    }
+
+    // --- Glavni tok ---
+    async function refreshPanel() {
+      try {
+        var pageR = await fetch(location.pathname + "?tab=audit", { headers: { Accept: "text/html" } });
+        var html = await pageR.text();
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.getElementById("audit-panel");
+        if (fresh) {
+          stopAuditPoll();
+          root.innerHTML = fresh.innerHTML;
+          wireAll();
+        }
+      } catch (e) {
+        console.error("refreshPanel:", e);
       }
     }
 
     async function runAudit() {
-      setEnabled(false);
-      showProgress(true);
+      clearError();
+      cancelled = false;
+      setRunBtnState("running", false);
+      showProgress();
       try {
-        const r = await fetch(`/api/site-audit/${leadId}/run`, { method: "POST" });
-        const d = await r.json();
-        if (!r.ok) {
-          if (stage) stage.textContent = "Greška: " + ((d && d.error) || r.statusText);
-          showProgress(true);
-          setTimeout(() => showProgress(false), 4500);
-          setEnabled(true);
+        var r = await fetch("/api/site-audit/" + leadId + "/run", { method: "POST" });
+        var d = await r.json().catch(function () { return {}; });
+        if (!r.ok || (d && d.error) || !d.jobId) {
+          var raw = (d && d.error) || r.statusText || "";
+          var kind = classifyError(raw) || classifyError(r.status + "");
+          showError(raw, kind);
+          setRunBtnState("error", true);
+          hideProgress();
           return;
         }
-        await refreshPanel();
+        startAuditPoll(d.jobId);
       } catch (e) {
-        if (stage) stage.textContent = "Greška: " + (e.message || e);
-        showProgress(true);
-        setTimeout(() => showProgress(false), 4500);
-        setEnabled(true);
+        showError("Mrežna greška: " + (e && e.message || e), "network");
+        setRunBtnState("error", true);
+        hideProgress();
       }
     }
 
+    // --- Site scrape (sync, ali sa async praćenjem) ---
+    async function pollScrape(jobId) {
+      try {
+        var r = await fetch("/api/scrape/status/" + jobId, { headers: { "Origin": location.origin } });
+        if (!r.ok) return;
+        var d = await r.json();
+        var stageEl = $("[data-scrape-stage]");
+        var countEl = $("[data-scrape-count]");
+        var barEl = $("[data-scrape-bar]");
+        var msgEl = $("[data-scrape-msg]");
+        var stage = d.status === "done" ? "✅ Gotovo"
+                  : d.status === "error" ? "❌ Greška"
+                  : (d.pages_scraped > 0 ? "Scrape stranica" : "Tražim sitemap");
+        var msg = "";
+        if (d.error) msg = d.error;
+        else if (!d.pages_scraped && !d.total_pages) msg = "Skeniram sitemap…";
+        else if (d.pages_scraped < d.total_pages) msg = "Stranica " + (d.pages_scraped + 1) + " / " + d.total_pages;
+        else if (d.screenshot) msg = "Screenshot sačuvan";
+        if (stageEl) stageEl.textContent = stage;
+        if (countEl) countEl.textContent = (d.pages_scraped || 0) + " / " + (d.total_pages || "?");
+        var pct = d.total_pages > 0 ? Math.min(100, Math.round((d.pages_scraped / d.total_pages) * 100)) : (d.status === "done" ? 100 : 5);
+        if (barEl) barEl.style.width = pct + "%";
+        if (msgEl) msgEl.textContent = msg;
+        if (d.status === "done" || d.status === "error") {
+          stopScrapePoll();
+          var btn = $("[data-start-scrape]");
+          if (btn) btn.disabled = false;
+          if (d.status === "done") {
+            setTimeout(function () { window.location.reload(); }, 1200);
+            await refreshPanel();
+          }
+        }
+      } catch (e) {
+        var msgEl = $("[data-scrape-msg]");
+        if (msgEl) msgEl.textContent = "Polling greška: " + e.message;
+      }
+    }
+
+    async function startScrape() {
+      var btn = $("[data-start-scrape]");
+      if (!btn) return;
+      if (scrapePollHandle) return;
+      btn.disabled = true;
+      var box = $("[data-scrape-progress]");
+      var msgEl = $("[data-scrape-msg]");
+      var stageEl = $("[data-scrape-stage]");
+      if (box) box.classList.remove("hidden");
+      if (stageEl) stageEl.textContent = "Pokrećem…";
+      if (msgEl) msgEl.textContent = "Šaljem zahtev scraper-u";
+      try {
+        var r = await fetch("/api/scrape", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Origin": location.origin },
+          body: JSON.stringify({ leadId: leadId }),
+        });
+        var d = await r.json();
+        if (!r.ok || !d.jobId) throw new Error(d.error || "Scraper greška");
+        scrapePollHandle = setInterval(function () { pollScrape(d.jobId); }, 1500);
+        pollScrape(d.jobId);
+      } catch (e) {
+        if (msgEl) msgEl.textContent = "❌ " + e.message;
+        btn.disabled = false;
+      }
+    }
+
+    function stopScrapePoll() {
+      if (scrapePollHandle) { clearInterval(scrapePollHandle); scrapePollHandle = null; }
+    }
+
     function wireRunButton() {
-      const btn = getRunBtn();
+      var btn = $("[data-audit-run]");
       if (!btn) return;
       if (btn.__wired) return;
       btn.__wired = true;
       btn.addEventListener("click", runAudit);
     }
-    wireRunButton();
-    // Expose for the parent page's tab-script to re-wire after innerHTML swaps
+    function wireScrapeButton() {
+      var btn = $("[data-start-scrape]");
+      if (!btn) return;
+      if (btn.__wiredScrape) return;
+      btn.__wiredScrape = true;
+      btn.addEventListener("click", startScrape);
+    }
+    function wireCancelButton() {
+      var btn = $("[data-audit-cancel]");
+      if (!btn) return;
+      if (btn.__wiredCancel) return;
+      btn.__wiredCancel = true;
+      btn.addEventListener("click", function () {
+        cancelled = true;
+        stopAuditPoll();
+        hideProgress();
+        setRunBtnState("cancelled", false);
+        // Ne brišemo activeJobId — ako korisnik opet klikne "Nastavi audit",
+        // runAudit() će napraviti novi job.
+      });
+    }
+
+    function wireAll() {
+      wireRunButton();
+      wireScrapeButton();
+      wireCancelButton();
+    }
+    wireAll();
+    // Expose za spoljni svet (npr. parent tab-script)
     window.__auditRunHandler = function () { runAudit(); };
   })();
 </script>
